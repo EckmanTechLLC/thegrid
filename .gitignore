@@ -1,0 +1,32 @@
+# --- Secrets: NEVER commit ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Agent workflow scratch (local only) ---
+.odin/
+.claude/
+
+# --- Python ---
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Runtime / local state ---
+data/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

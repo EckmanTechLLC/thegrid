@@ -1,0 +1,40 @@
+services:
+  nats:
+    image: nats:latest
+    container_name: thegrid-nats
+    command: ["-js", "-m", "8224", "-sd", "/data"]
+    ports:
+      - "4224:4222"
+      - "8224:8224"
+    volumes:
+      - nats-data:/data
+    networks:
+      - thegrid-network
+    restart: unless-stopped
+
+  flux:
+    build:
+      context: ../flux
+      dockerfile: Dockerfile
+    container_name: thegrid-flux
+    environment:
+      - NATS_URL=nats://nats:4222
+      - PORT=3000
+      - FLUX_ENCRYPTION_KEY=${FLUX_ENCRYPTION_KEY}
+      - FLUX_AUTH_ENABLED=false
+    volumes:
+      - ./data/flux:/data
+    ports:
+      - "3000:3000"
+    networks:
+      - thegrid-network
+    depends_on:
+      - nats
+    restart: unless-stopped
+
+networks:
+  thegrid-network:
+    driver: bridge
+
+volumes:
+  nats-data:
