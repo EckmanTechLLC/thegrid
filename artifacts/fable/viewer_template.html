@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>colony — substrate monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --void:#0A0912; --panel:#14121F; --panel-2:#1B182B; --rule:#2C2645;
+  --ink:#E8E3F7; --ink-dim:#8A82A8; --ink-faint:#5A5478;
+  --mote:#CFF3FF; --alarm:#FF7A4D; --amber:#FFB03A;
+  --tint:0;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--void); color:var(--ink);
+  font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:13px; line-height:1.5;
+  display:flex; flex-direction:column; min-height:100%;
+  -webkit-font-smoothing:antialiased;
+}
+/* signature: the whole instrument runs hot when the colony does */
+body::after{
+  content:''; position:fixed; inset:0; pointer-events:none; z-index:5;
+  background:radial-gradient(120% 80% at 50% 110%, rgba(255,90,40,.55), transparent 62%);
+  opacity:calc(var(--tint) * .5); transition:opacity .5s ease;
+}
+h1{
+  font-family:'Archivo',system-ui,sans-serif; font-weight:700;
+  font-size:15px; letter-spacing:.34em; text-transform:uppercase;
+}
+header{
+  display:flex; align-items:baseline; gap:18px; flex-wrap:wrap;
+  padding:16px 20px; border-bottom:1px solid var(--rule); background:var(--panel);
+}
+.sub{color:var(--ink-faint); letter-spacing:.06em; font-size:11px}
+.spacer{flex:1}
+.tick{font-size:22px; font-weight:700; font-variant-numeric:tabular-nums}
+.tick span{color:var(--ink-faint); font-size:11px; font-weight:400; letter-spacing:.2em}
+
+main{display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:1px; background:var(--rule); flex:1}
+.left{background:var(--panel); display:flex; flex-direction:column; min-width:0}
+.side{background:var(--panel)}
+.field{display:flex; align-items:center; justify-content:center; padding:20px 20px 14px; min-height:300px}
+canvas#grid{
+  image-rendering:pixelated; width:100%; height:auto; max-width:620px;
+  border:1px solid var(--rule); background:#0d0a1c;
+}
+.side{padding:18px 20px; display:flex; flex-direction:column; gap:16px; overflow:hidden}
+
+/* strain composition — who is winning, at a glance */
+.strains{display:flex; height:8px; border-radius:2px; overflow:hidden; background:var(--panel-2); margin-top:5px}
+.strains i{display:block; height:100%; transition:width .18s linear}
+.strainkey{display:flex; flex-wrap:wrap; gap:4px 11px; margin-top:7px; font-size:10px; color:var(--ink-faint)}
+.strainkey span{display:flex; align-items:center; gap:4px; font-variant-numeric:tabular-nums}
+.strainkey b{width:7px; height:7px; border-radius:50%; display:inline-block}
+
+/* dominant genome, diffed against the seeded ancestor */
+.genome{border-top:1px solid var(--rule); padding:14px 20px 18px; min-height:0}
+.genome header{all:unset; display:flex; align-items:baseline; gap:12px; margin-bottom:10px}
+.genome h2{font-size:10px; letter-spacing:.22em; text-transform:uppercase; color:var(--ink-faint); font-weight:500}
+.genome .meta{font-size:10px; color:var(--ink-faint); letter-spacing:.08em}
+.tokens{display:flex; flex-wrap:wrap; gap:3px}
+.tok{
+  font-size:10.5px; padding:3px 7px; border-radius:2px; letter-spacing:.03em;
+  background:var(--panel-2); color:var(--ink-dim); border:1px solid transparent;
+}
+.tok.add{background:rgba(127,233,255,.14); color:var(--mote); border-color:rgba(127,233,255,.42)}
+.tok.del{color:var(--ink-faint); text-decoration:line-through; opacity:.55; background:transparent}
+
+.readout{display:flex; flex-direction:column; gap:3px}
+.readout .label{font-size:10px; letter-spacing:.22em; text-transform:uppercase; color:var(--ink-faint)}
+.readout .value{font-size:19px; font-weight:700; font-variant-numeric:tabular-nums; line-height:1.15}
+.readout .value em{font-style:normal; font-size:11px; font-weight:400; color:var(--ink-dim); margin-left:5px}
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+
+.meter{height:4px; background:var(--panel-2); border-radius:2px; overflow:hidden; margin-top:5px}
+.meter i{display:block; height:100%; width:0; transition:width .18s linear}
+.meter.mem i{background:var(--mote)}
+.meter.heat i{background:linear-gradient(90deg,#94266a,var(--amber))}
+.hot .value{color:var(--alarm)}
+
+.log{flex:1; min-height:0; display:flex; flex-direction:column; gap:6px; border-top:1px solid var(--rule); padding-top:14px}
+.log h2{font-size:10px; letter-spacing:.22em; text-transform:uppercase; color:var(--ink-faint); font-weight:500; font-family:inherit}
+.log ol{list-style:none; overflow-y:auto; display:flex; flex-direction:column; gap:5px; font-size:11px}
+.log li{display:flex; gap:9px; color:var(--ink-dim)}
+.log li b{color:var(--ink-faint); font-weight:400; font-variant-numeric:tabular-nums; min-width:46px}
+.log li.heat{color:var(--alarm)}
+.log li.task{color:var(--mote)}
+.log .empty{color:var(--ink-faint); font-size:11px}
+
+footer{border-top:1px solid var(--rule); background:var(--panel); padding:12px 20px 16px}
+canvas#trace{width:100%; height:56px; display:block; margin-bottom:10px}
+.transport{display:flex; align-items:center; gap:14px; flex-wrap:wrap}
+button{
+  font:inherit; font-weight:700; letter-spacing:.14em; text-transform:uppercase; font-size:11px;
+  background:var(--panel-2); color:var(--ink); border:1px solid var(--rule);
+  padding:8px 16px; border-radius:2px; cursor:pointer; transition:background .15s,border-color .15s;
+}
+button:hover{background:#252038; border-color:#3D3560}
+button:focus-visible, input:focus-visible{outline:2px solid var(--mote); outline-offset:2px}
+input[type=range]{flex:1; min-width:140px; accent-color:var(--mote); cursor:pointer}
+.legend{display:flex; align-items:center; gap:8px; font-size:10px; color:var(--ink-faint); letter-spacing:.1em}
+.ramp{width:78px; height:7px; border-radius:2px}
+
+@media (max-width:760px){
+  main{grid-template-columns:1fr}
+  .genome{padding:14px 16px}
+  .side{max-height:none}
+  h1{font-size:13px; letter-spacing:.24em}
+}
+@media (prefers-reduced-motion:reduce){
+  *{transition:none !important}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Colony</h1>
+  <span class="sub">substrate monitor</span>
+  <span class="spacer"></span>
+  <span class="tick"><span>TICK</span> <b id="tick">0</b></span>
+</header>
+
+<main>
+  <div class="left">
+    <div class="field"><canvas id="grid" width="32" height="32"></canvas></div>
+    <section class="genome">
+      <header>
+        <h2>Dominant genome</h2>
+        <span class="meta" id="genmeta">vs ancestor</span>
+      </header>
+      <div class="tokens" id="tokens"></div>
+    </section>
+  </div>
+
+  <aside class="side">
+    <div class="grid2">
+      <div class="readout">
+        <span class="label">Population</span>
+        <span class="value" id="pop">0</span>
+      </div>
+      <div class="readout">
+        <span class="label">Generation</span>
+        <span class="value" id="gen">0</span>
+      </div>
+    </div>
+
+    <div class="readout">
+      <span class="label">Memory</span>
+      <span class="value" id="mem">0%</span>
+      <div class="meter mem"><i id="membar"></i></div>
+    </div>
+
+    <div class="readout" id="heatblock">
+      <span class="label">Thermal load</span>
+      <span class="value" id="heat">0<em id="mult">x1.00</em></span>
+      <div class="meter heat"><i id="heatbar"></i></div>
+    </div>
+
+    <div class="readout">
+      <span class="label">Strains</span>
+      <div class="strains" id="strains"></div>
+      <div class="strainkey" id="strainkey"></div>
+    </div>
+
+    <div class="grid2">
+      <div class="readout">
+        <span class="label">Births</span>
+        <span class="value" id="births">0</span>
+      </div>
+      <div class="readout">
+        <span class="label">Deaths</span>
+        <span class="value" id="deaths">0</span>
+      </div>
+    </div>
+
+    <div class="log">
+      <h2>Log</h2>
+      <ol id="events"><li class="empty">Nothing has happened yet.</li></ol>
+    </div>
+  </aside>
+</main>
+
+<footer>
+  <canvas id="trace" width="1200" height="112"></canvas>
+  <div class="transport">
+    <button id="play">Play</button>
+    <button id="speed">1x</button>
+    <input type="range" id="scrub" min="0" max="0" value="0" aria-label="Scrub timeline">
+    <span class="legend">
+      depleted
+      <span class="ramp" id="ramp"></span>
+      rich
+    </span>
+  </div>
+</footer>
+
+<script id="run" type="application/json">__DATA__</script>
+<script>
+const RAW = document.getElementById('run').textContent;
+if (RAW.trim() === '__' + 'DATA__'){
+  document.body.innerHTML =
+    '<div style="margin:auto;padding:40px;max-width:520px;text-align:center;color:#8A82A8">' +
+    '<h1 style="color:#E8E3F7;margin-bottom:14px">No recording loaded</h1>' +
+    '<p>This is the viewer template, not a recording. Generate one with:</p>' +
+    '<p style="color:#CFF3FF;margin:14px 0">python -m colony.record --ticks 9000 --out run.html</p>' +
+    '<p>That writes a self-contained page with the run embedded.</p></div>';
+  throw new Error('template opened directly; no recording embedded');
+}
+const DATA = JSON.parse(RAW);
+const A = "0123456789abcdefghijklmnopqrstuv";
+const RAMP = ['#171331','#241a4d','#3a1f63','#56206e','#75216f','#94266a','#b4305c','#d24a45','#ea7128','#ffb03a'];
+// One hue per founding lineage. Chosen to stay legible over a field that runs
+// indigo through magenta to amber.
+const STRAIN = ['#7FE9FF','#7CFFC4','#C9A6FF','#FFFFFF','#FF9BD2','#C3FF6B'];
+const STRAIN_RGB = STRAIN.map(h => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)]);
+const ISA = DATA.isa || [];
+
+const W = DATA.width, H = DATA.height, frames = DATA.frames;
+const grid = document.getElementById('grid'), gtx = grid.getContext('2d');
+const trace = document.getElementById('trace'), ttx = trace.getContext('2d');
+grid.width = W; grid.height = H;
+
+document.getElementById('ramp').style.background =
+  `linear-gradient(90deg, ${RAMP.join(',')})`;
+
+// Offscreen buffer: paint the energy field a pixel per tile, then let the
+// canvas scale it up. Pixelated upscaling keeps the tile edges honest.
+const buf = document.createElement('canvas');
+buf.width = W; buf.height = H;
+const btx = buf.getContext('2d');
+const img = btx.createImageData(W, H);
+
+const RGB = RAMP.map(h => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)]);
+
+let index = 0, playing = false, speed = 1, acc = 0, last = 0;
+const shown = new Set();
+
+function drawField(frame){
+  const e = frame.e, d = img.data;
+  for (let i = 0; i < W*H; i++){
+    const [r,g,b] = RGB[e.charCodeAt(i) - 48] || RGB[0];
+    d[i*4] = r; d[i*4+1] = g; d[i*4+2] = b; d[i*4+3] = 255;
+  }
+  // Organisms are drawn over the field, coloured by which founder they descend
+  // from — so a strain sweeping the map is something you can see happen.
+  const o = frame.o;
+  for (let i = 0; i + 2 < o.length + 1; i += 3){
+    const idx = A.indexOf(o[i]) * 32 + A.indexOf(o[i+1]);
+    if (idx < 0 || idx >= W*H) continue;
+    const [r,g,b] = STRAIN_RGB[A.indexOf(o[i+2]) % STRAIN_RGB.length] || STRAIN_RGB[0];
+    d[idx*4] = r; d[idx*4+1] = g; d[idx*4+2] = b; d[idx*4+3] = 255;
+  }
+  btx.putImageData(img, 0, 0);
+  gtx.imageSmoothingEnabled = false;
+  gtx.clearRect(0,0,W,H);
+  gtx.drawImage(buf, 0, 0);
+}
+
+function drawTrace(upTo){
+  const w = trace.width, h = trace.height;
+  ttx.clearRect(0,0,w,h);
+  const maxPop = Math.max(...frames.map(f => f.p), 1);
+  const maxHeat = Math.max(...frames.map(f => f.h), 1);
+
+  // Shade the stretches where the colony was throttling itself.
+  ttx.fillStyle = 'rgba(255,122,77,.13)';
+  frames.forEach((f, i) => {
+    if (f.x > 1) ttx.fillRect(i / frames.length * w, 0, w / frames.length + 1, h);
+  });
+
+  const line = (key, max, colour, width) => {
+    ttx.beginPath();
+    frames.forEach((f, i) => {
+      const x = i / (frames.length - 1) * w;
+      const y = h - (f[key] / max) * (h - 8) - 4;
+      i ? ttx.lineTo(x, y) : ttx.moveTo(x, y);
+    });
+    ttx.strokeStyle = colour; ttx.lineWidth = width; ttx.stroke();
+  };
+  line('h', maxHeat, 'rgba(255,176,58,.55)', 1.5);
+  line('p', maxPop, '#CFF3FF', 2);
+
+  const px = upTo / (frames.length - 1) * w;
+  ttx.strokeStyle = 'rgba(232,227,247,.8)'; ttx.lineWidth = 1;
+  ttx.beginPath(); ttx.moveTo(px, 0); ttx.lineTo(px, h); ttx.stroke();
+}
+
+function renderEvents(tick){
+  const list = document.getElementById('events');
+  const due = DATA.events.filter(e => e.tick <= tick).slice(-14).reverse();
+  if (!due.length){
+    list.innerHTML = '<li class="empty">Nothing has happened yet.</li>';
+    return;
+  }
+  list.innerHTML = due.map(e => {
+    const hot = e.text.includes('throttling') ? ' hot' : '';
+    const fresh = !shown.has(e.tick + e.text) ? ' new' : '';
+    shown.add(e.tick + e.text);
+    return `<li class="${e.kind || ''}"><b>${e.tick}</b>${e.text}</li>`;
+  }).join('');
+}
+
+// Longest common subsequence, so the genome panel shows real insertions and
+// deletions rather than a positional smear that shifts on every indel.
+function diff(a, b){
+  const n = a.length, m = b.length;
+  const L = Array.from({length:n+1}, () => new Uint16Array(m+1));
+  for (let i = n-1; i >= 0; i--)
+    for (let j = m-1; j >= 0; j--)
+      L[i][j] = a[i] === b[j] ? L[i+1][j+1] + 1 : Math.max(L[i+1][j], L[i][j+1]);
+
+  const out = [];
+  let i = 0, j = 0;
+  while (i < n && j < m){
+    if (a[i] === b[j]){ out.push(['same', b[j]]); i++; j++; }
+    else if (L[i+1][j] >= L[i][j+1]){ out.push(['del', a[i]]); i++; }
+    else { out.push(['add', b[j]]); j++; }
+  }
+  while (i < n) out.push(['del', a[i++]]);
+  while (j < m) out.push(['add', b[j++]]);
+  return out;
+}
+
+const decodeGenome = (s) => [...s].map(c => ISA[A.indexOf(c)] || '?');
+const ANCESTOR = decodeGenome(DATA.ancestor || '');
+
+function renderGenome(frame){
+  const genome = decodeGenome(frame.dom || '');
+  const parts = diff(ANCESTOR, genome);
+  const added = parts.filter(p => p[0] === 'add').length;
+  const removed = parts.filter(p => p[0] === 'del').length;
+
+  document.getElementById('tokens').innerHTML =
+    parts.map(([kind, name]) => `<span class="tok ${kind === 'same' ? '' : kind}">${name}</span>`).join('');
+
+  const drift = added || removed
+    ? `${added ? '+' + added : ''}${added && removed ? ' / ' : ''}${removed ? '\u2212' + removed : ''} vs ancestor`
+    : 'unchanged from ancestor';
+  document.getElementById('genmeta').textContent = `${frame.car} carriers \u00b7 ${drift}`;
+}
+
+function renderStrains(frame){
+  const mix = frame.s || [];
+  const total = mix.reduce((a,b) => a+b, 0) || 1;
+  document.getElementById('strains').innerHTML =
+    mix.map((n,i) => `<i style="width:${n/total*100}%;background:${STRAIN[i % STRAIN.length]}"></i>`).join('');
+  document.getElementById('strainkey').innerHTML =
+    mix.map((n,i) => n ? `<span><b style="background:${STRAIN[i % STRAIN.length]}"></b>${n}</span>` : '')
+       .join('');
+}
+
+function show(i){
+  index = Math.max(0, Math.min(frames.length - 1, i));
+  const f = frames[index];
+
+  drawField(f);
+  drawTrace(index);
+  renderEvents(f.t);
+  renderGenome(f);
+  renderStrains(f);
+
+  document.getElementById('tick').textContent = f.t.toLocaleString();
+  document.getElementById('pop').textContent = f.p;
+  document.getElementById('gen').textContent = f.g;
+  document.getElementById('births').textContent = f.b;
+  document.getElementById('deaths').textContent = f.d;
+  document.getElementById('mem').textContent = Math.round(f.m * 100) + '%';
+  document.getElementById('membar').style.width = (f.m * 100) + '%';
+  document.getElementById('heat').firstChild.nodeValue = Math.round(f.h);
+  document.getElementById('mult').textContent = 'x' + f.x.toFixed(2);
+  document.getElementById('heatbar').style.width = Math.min(100, f.h / 80 * 100) + '%';
+
+  const over = Math.max(0, f.x - 1);
+  document.documentElement.style.setProperty('--tint', Math.min(1, over / 0.8).toFixed(2));
+  document.getElementById('heatblock').classList.toggle('hot', f.x > 1);
+
+  document.getElementById('scrub').value = index;
+}
+
+function loop(now){
+  if (playing){
+    if (!last) last = now;
+    acc += (now - last) * speed;
+    last = now;
+    while (acc > 90){
+      acc -= 90;
+      if (index >= frames.length - 1){ setPlaying(false); break; }
+      show(index + 1);
+    }
+  } else { last = 0; }
+  requestAnimationFrame(loop);
+}
+
+function setPlaying(on){
+  playing = on;
+  document.getElementById('play').textContent = on ? 'Pause' : 'Play';
+  if (on && index >= frames.length - 1) show(0);
+}
+
+document.getElementById('play').onclick = () => setPlaying(!playing);
+document.getElementById('speed').onclick = (e) => {
+  speed = speed === 1 ? 2 : speed === 2 ? 4 : 1;
+  e.target.textContent = speed + 'x';
+};
+document.getElementById('scrub').oninput = (e) => { setPlaying(false); show(+e.target.value); };
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space'){ e.preventDefault(); setPlaying(!playing); }
+  if (e.code === 'ArrowRight'){ setPlaying(false); show(index + 1); }
+  if (e.code === 'ArrowLeft'){ setPlaying(false); show(index - 1); }
+});
+
+document.getElementById('scrub').max = frames.length - 1;
+show(0);
+requestAnimationFrame(loop);
+if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) setPlaying(true);
+</script>
+</body>
+</html>

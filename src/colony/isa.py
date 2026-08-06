@@ -1,0 +1,73 @@
+"""Instruction set for colony organisms."""
+
+from dataclasses import dataclass
+from enum import IntEnum
+
+
+class Op(IntEnum):
+    NOP = 0
+    HARVEST = 1
+    SCAN = 2
+    MOVE = 3
+    ALLOC = 4
+    COPY = 5
+    IFNOTDONE = 6
+    JMPB = 7
+    FORK = 8
+    FREE = 9
+    INC = 10
+    DEC = 11
+    SWAP = 12
+    INPUT = 13
+    NAND = 14
+    OUTPUT = 15
+    IFZERO = 16
+    PUSH = 17
+
+
+@dataclass(frozen=True)
+class Instruction:
+    name: str
+    cost: float
+    doc: str
+
+
+ISA = [
+    Instruction("nop", 0.15, "do nothing"),
+    Instruction("harvest", 0.35, "draw energy from the current tile"),
+    Instruction("scan", 0.45, "sense the richest neighbouring direction into A"),
+    Instruction("move", 0.70, "move in direction A mod 4"),
+    Instruction("alloc", 0.80, "reserve memory for a child genome"),
+    Instruction("copy", 0.55, "copy one genome word into the child buffer"),
+    Instruction("ifnotdone", 0.20, "execute next instruction while copying; otherwise skip it"),
+    Instruction("jmpb", 0.25, "jump back (C mod 8) + 1 instructions"),
+    Instruction("fork", 1.50, "birth the completed child"),
+    Instruction("free", 0.25, "release an incomplete child buffer"),
+    Instruction("inc", 0.20, "increment A"),
+    Instruction("dec", 0.20, "decrement A"),
+    Instruction("swap", 0.20, "swap A and B"),
+    Instruction("input", 0.30, "read an environmental input into A"),
+    Instruction("nand", 0.40, "set A to NAND(A, B)"),
+    Instruction("output", 0.35, "submit A to the task environment"),
+    Instruction("ifzero", 0.20, "skip next instruction unless A is zero"),
+    Instruction("push", 0.20, "copy A into C"),
+]
+
+NUM_OPS = len(ISA)
+NAME_TO_OP = {instruction.name: i for i, instruction in enumerate(ISA)}
+
+
+def build_ancestor() -> list[int]:
+    """A small viable replicator; all later organisms descend from this."""
+    return [
+        Op.HARVEST, Op.HARVEST, Op.ALLOC, Op.COPY, Op.IFNOTDONE,
+        Op.JMPB, Op.FORK, Op.SCAN, Op.MOVE,
+    ]
+
+
+def disassemble(genome: list[int], annotate: bool = True) -> str:
+    lines = []
+    for index, word in enumerate(genome):
+        name = ISA[word].name if 0 <= word < NUM_OPS else f"invalid({word})"
+        lines.append(f"{index:03d}: {name}" if annotate else f"{index}: {name}")
+    return "\n".join(lines)
