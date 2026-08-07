@@ -16,27 +16,38 @@ from aiohttp import web
 
 from .colony import Colony
 from .isa import ISA, build_ancestor
-from .mutation import RandomMutator
+from .odin_operator import OdinMutator
 from .record import encode_energy, encode_genome, encode_positions
 from .tasks import TaskEnvironment
-from .world import World, WorldConfig
+from .substrate import SubstrateWorld
+from .world import WorldConfig
 
 
 class Habitat:
-    def __init__(self, state_path: Path, seed: int = 42, founders: int = 6):
+    def __init__(self, state_path: Path, seed: int = 42, founders: int = 6,
+                 physical: bool = True):
         self.state_path = state_path
         self.seed = seed
         self.founders = founders
+        self.physical = physical
         self.epoch = 1
         self.started_at = time.time()
         self.events: deque[dict] = deque(maxlen=40)
         self.colony = self._load_or_create()
         self.running = True
         self._last_tasks = set(self.colony.task_firsts)
+        self.latest = self.snapshot()
 
     def _new_colony(self) -> Colony:
-        world = World(WorldConfig(seed=self.seed))
-        return Colony(world, RandomMutator(), TaskEnvironment(),
+        if self.physical:
+            world = SubstrateWorld(WorldConfig(seed=self.seed))
+            mutator = OdinMutator(Path.home() / ".local/state/thegrid/operator")
+        else:  # deterministic unit-test boundary; never used by the service
+            from .mutation import RandomMutator
+            from .world import World
+            world = World(WorldConfig(seed=self.seed))
+            mutator = RandomMutator()
+        return Colony(world, mutator, TaskEnvironment(),
                       seed=self.seed, founders=self.founders)
 
     def _load_or_create(self) -> Colony:
@@ -46,7 +57,12 @@ class Habitat:
             self.epoch = int(saved.get("epoch", 1))
             self.started_at = float(saved.get("started_at", time.time()))
             self.events.extend(saved.get("events", []))
-            return saved["colony"]
+            colony = saved["colony"]
+            if self.physical and not isinstance(colony.world, SubstrateWorld):
+                colony.world = SubstrateWorld.from_world(colony.world)
+            if self.physical and not isinstance(colony.mutator, OdinMutator):
+                colony.mutator = OdinMutator(Path.home() / ".local/state/thegrid/operator")
+            return colony
         except FileNotFoundError:
             return self._new_colony()
         except Exception as exc:
@@ -92,6 +108,10 @@ class Habitat:
             "births": colony.births, "deaths": colony.deaths,
             "memory": round(world.memory_pressure, 4), "heat": round(world.heat, 2),
             "cost": round(world.cost_multiplier, 2),
+            "memoryBytes": getattr(world, "cgroup_memory_current", 0),
+            "memoryMaxBytes": getattr(world, "cgroup_memory_max", 0),
+            "cpuUsageUsec": getattr(world, "cpu_usage_usec", 0),
+            "substrate": "linux-cgroup-v2 + AMD k10temp" if self.physical else "test",
             "energy": encode_energy(world),
             "organisms": encode_positions(colony, world.config.width),
             "strains": [strains.get(i, 0) for i in range(self.founders)],
@@ -109,11 +129,15 @@ async def run_habitat(habitat: Habitat, ticks_per_second: int) -> None:
     saves = 0
     while habitat.running:
         before = time.monotonic()
-        for _ in range(batch):
-            habitat.step()
+        def advance() -> None:
+            for _ in range(batch):
+                habitat.step()
+        # The VM can consume its full cgroup slice without blocking HTTP.
+        await asyncio.to_thread(advance)
+        habitat.latest = habitat.snapshot()
         saves += batch
         if saves >= 1000:
-            habitat.save()
+            await asyncio.to_thread(habitat.save)
             saves = 0
         delay = interval - (time.monotonic() - before)
         if delay > 0:
@@ -125,7 +149,7 @@ async def run_habitat(habitat: Habitat, ticks_per_second: int) -> None:
 async def create_app(habitat: Habitat, ticks_per_second: int) -> web.Application:
     app = web.Application()
     app.router.add_get("/", lambda _: web.FileResponse(Path(__file__).with_name("live_viewer.html")))
-    app.router.add_get("/api/state", lambda _: web.json_response(habitat.snapshot(),
+    app.router.add_get("/api/state", lambda _: web.json_response(habitat.latest,
                                                                   dumps=lambda x: json.dumps(x, separators=(",", ":"))))
 
     async def start(app: web.Application) -> None:

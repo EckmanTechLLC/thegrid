@@ -22,6 +22,9 @@ python3 -m venv .venv
 The persistent habitat runs continuously under the `thegrid-colony.service`
 user service. Its LAN observer is available on port 8787. State is checkpointed
 atomically to `~/.local/state/thegrid/colony.pkl` and restored after restarts.
+The service has finite cgroup v2 CPU/RAM bounds; genome reservations commit real
+resident pages, and thermal pressure is read from the AMD Tctl sensor. Mutation
+requests are queued for Odin to author rather than sent to an API model.
 
 For a foreground development run:
 
