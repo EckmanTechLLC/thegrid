@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import ctypes
 import gc
 import json
 import os
@@ -101,10 +102,20 @@ class Habitat:
             # founders request memory from the same cgroup.
             self.colony = None  # type: ignore[assignment]
             gc.collect()
+            # CPython may retain freed arenas, which still count against the
+            # real cgroup limit. Return them before founders request RSS.
+            try:
+                ctypes.CDLL(None).malloc_trim(0)
+            except (AttributeError, OSError):
+                pass
             self.seed += 1
             replacement = self._new_colony()
             if not replacement.organisms:
-                raise RuntimeError("physical substrate could not seed a new epoch")
+                # Persist the empty boundary, then let systemd give the next
+                # epoch a clean address space. This is recovery, not revival.
+                self.colony = replacement
+                self.save()
+                os._exit(75)
             self.colony = replacement
             self.epoch += 1
             self.events.append({"tick": last_tick, "text": "colony became extinct; new epoch seeded"})
