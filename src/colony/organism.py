@@ -28,6 +28,10 @@ class Organism:
     harvested: float = 0.0
     last_inputs: tuple[int, int] = (0, 0)
     input_index: int = 0
+    signals_sent: int = 0
+    structures_built: int = 0
+    neighbor_reads: int = 0
+    foreign_copies: int = 0
 
     def telemetry(self) -> dict:
         return {
@@ -35,6 +39,10 @@ class Organism:
             "generation": self.generation, "births": self.births,
             "harvested": round(self.harvested, 2),
             "tasks_solved": dict(self.tasks_solved), "genome_length": len(self.genome),
+            "signals_sent": getattr(self, "signals_sent", 0),
+            "structures_built": getattr(self, "structures_built", 0),
+            "neighbor_reads": getattr(self, "neighbor_reads", 0),
+            "foreign_copies": getattr(self, "foreign_copies", 0),
         }
 
     def execute(self, colony) -> None:
@@ -95,6 +103,30 @@ class Organism:
             next_ip = (self.ip + 2) % len(self.genome)
         elif op == Op.PUSH:
             self.c = self.a
+        elif op == Op.SIGNAL:
+            colony.world.signal(self.x, self.y, self.a)
+            self.signals_sent = getattr(self, "signals_sent", 0) + 1
+        elif op == Op.LISTEN:
+            self.a = colony.world.listen(self.x, self.y)
+        elif op == Op.BUILD:
+            if self.energy >= 4.0:
+                self.energy -= 4.0
+                colony.world.build(self.x, self.y)
+                self.structures_built = getattr(self, "structures_built", 0) + 1
+        elif op == Op.PEEK:
+            other = colony.neighbor(self)
+            if other and other.genome:
+                self.a = other.genome[self.b % len(other.genome)]
+                self.neighbor_reads = getattr(self, "neighbor_reads", 0) + 1
+                colony.neighbor_reads += 1
+        elif op == Op.COPYN and self.child is not None and self.copy_index < len(self.genome):
+            other = colony.neighbor(self)
+            if other and other.genome:
+                word = other.genome[self.copy_index % len(other.genome)]
+                self.child.append(colony.mutator.copy_error(word, colony.rng))
+                self.copy_index += 1
+                self.foreign_copies = getattr(self, "foreign_copies", 0) + 1
+                colony.foreign_copies += 1
         self.ip = next_ip
 
     def free_child(self, world) -> None:

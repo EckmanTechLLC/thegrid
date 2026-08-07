@@ -53,6 +53,9 @@ class World:
             [self._initial_energy() for _ in range(c.width)]
             for _ in range(c.height)
         ]
+        self.signals = [[0] * c.width for _ in range(c.height)]
+        self.signal_strength = [[0] * c.width for _ in range(c.height)]
+        self.structures = [[0] * c.width for _ in range(c.height)]
 
         self.memory_used: int = 0
         self.heat: float = 0.0
@@ -79,6 +82,21 @@ class World:
 
     def wrap(self, x: int, y: int) -> tuple[int, int]:
         return x % self.config.width, y % self.config.height
+
+    def signal(self, x: int, y: int, value: int) -> None:
+        x, y = self.wrap(x, y)
+        self.signals[y][x] = value & 0xFF
+        self.signal_strength[y][x] = 12
+
+    def listen(self, x: int, y: int) -> int:
+        cells = [self.wrap(x, y), self.wrap(x, y - 1), self.wrap(x + 1, y),
+                 self.wrap(x, y + 1), self.wrap(x - 1, y)]
+        sx, sy = max(cells, key=lambda p: self.signal_strength[p[1]][p[0]])
+        return self.signals[sy][sx] if self.signal_strength[sy][sx] else 0
+
+    def build(self, x: int, y: int) -> None:
+        x, y = self.wrap(x, y)
+        self.structures[y][x] = min(20, self.structures[y][x] + 1)
 
     # ── memory ────────────────────────────────────────────────────────────
 
@@ -117,10 +135,20 @@ class World:
 
     def step(self) -> None:
         c = self.config
-        for row in self.energy:
+        phase = (self.tick // 2000) % 4
+        for y, row in enumerate(self.energy):
             for x in range(c.width):
                 if row[x] < c.tile_capacity:
-                    row[x] = min(c.tile_capacity, row[x] + c.tile_regen)
+                    quadrant = (x >= c.width // 2) + 2 * (y >= c.height // 2)
+                    climate = 1.8 if quadrant == phase else 0.55
+                    construction = self.structures[y][x] * 0.003
+                    row[x] = min(c.tile_capacity, row[x] + c.tile_regen * climate + construction)
+                if self.signal_strength[y][x] > 0:
+                    self.signal_strength[y][x] -= 1
+                    if self.signal_strength[y][x] == 0:
+                        self.signals[y][x] = 0
+                if self.tick and self.tick % 500 == 0 and self.structures[y][x] > 0:
+                    self.structures[y][x] -= 1
 
         self.heat = self.heat * c.heat_decay + self.instructions_this_tick * c.heat_per_instruction
         self.instructions_this_tick = 0

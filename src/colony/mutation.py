@@ -151,6 +151,9 @@ PHYSICS
 - `jmpb` jumps back (register C mod 8) + 1.
 - The environment pays energy bonuses for logic tasks: read values with `input`,
   compute with `nand`, submit with `output`. Harder tasks pay more.
+- `signal`/`listen` permit local communication. `build` spends energy to improve
+  a patch. `peek`/`copyn` can read or copy adjacent genomes, permitting
+  cooperation, parasitism, and defensive arms races. Rich climate regions move.
 
 PARENT GENOME
 {disassemble(genome, annotate=False)}

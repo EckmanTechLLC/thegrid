@@ -63,7 +63,14 @@ class OdinMutator:
                 "request_id": hashlib.sha256((str(time.time_ns()) + repr(names)).encode()).hexdigest()[:16],
                 "created_at": time.time(), "parent": parent.telemetry(),
                 "genome": names,
-                "instruction_set": [item.name for item in ISA],
+                "instruction_set": [{"name": item.name, "cost": item.cost, "effect": item.doc}
+                                    for item in ISA],
+                "ecology": {
+                    "signal/listen": "ephemeral local communication",
+                    "build": "costly persistent improvement of a resource patch",
+                    "peek/copyn": "read or copy adjacent organisms' code; enables parasitism",
+                    "climate": "the rich quadrant moves every 2,000 ticks",
+                },
                 "directive": "Odin must author one motivated variant; preserve viable replication.",
             }
             temporary = request.with_suffix(".tmp")

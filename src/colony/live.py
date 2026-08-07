@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import gc
 import json
 import os
 import pickle
@@ -62,6 +63,17 @@ class Habitat:
                 colony.world = SubstrateWorld.from_world(colony.world)
             if self.physical and not isinstance(colony.mutator, OdinMutator):
                 colony.mutator = OdinMutator(Path.home() / ".local/state/thegrid/operator")
+            config = colony.world.config
+            for name in ("signals", "signal_strength", "structures"):
+                if not hasattr(colony.world, name):
+                    setattr(colony.world, name,
+                            [[0] * config.width for _ in range(config.height)])
+            colony.neighbor_reads = getattr(colony, "neighbor_reads", 0)
+            colony.foreign_copies = getattr(colony, "foreign_copies", 0)
+            for organism in colony.organisms:
+                for name in ("signals_sent", "structures_built", "neighbor_reads", "foreign_copies"):
+                    if not hasattr(organism, name):
+                        setattr(organism, name, 0)
             return colony
         except FileNotFoundError:
             return self._new_colony()
@@ -85,10 +97,17 @@ class Habitat:
     def step(self) -> None:
         if not self.colony.organisms:
             last_tick = self.colony.world.tick
-            self.events.append({"tick": last_tick, "text": "colony became extinct; new epoch seeded"})
-            self.epoch += 1
+            # Release the extinct population's real resident pages before
+            # founders request memory from the same cgroup.
+            self.colony = None  # type: ignore[assignment]
+            gc.collect()
             self.seed += 1
-            self.colony = self._new_colony()
+            replacement = self._new_colony()
+            if not replacement.organisms:
+                raise RuntimeError("physical substrate could not seed a new epoch")
+            self.colony = replacement
+            self.epoch += 1
+            self.events.append({"tick": last_tick, "text": "colony became extinct; new epoch seeded"})
             self._last_tasks.clear()
         self.colony.step()
         for name, tick in self.colony.task_firsts.items():
@@ -119,6 +138,11 @@ class Habitat:
             "isa": [item.name for item in ISA],
             "ancestor": encode_genome(build_ancestor()),
             "tasks": colony.task_firsts,
+            "climatePhase": (world.tick // 2000) % 4,
+            "activeSignals": sum(value > 0 for row in world.signal_strength for value in row),
+            "builtTiles": sum(value > 0 for row in world.structures for value in row),
+            "neighborReads": colony.neighbor_reads,
+            "foreignCopies": colony.foreign_copies,
             "events": list(self.events),
         }
 

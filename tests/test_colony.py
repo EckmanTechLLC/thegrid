@@ -1,5 +1,5 @@
 from src.colony.colony import Colony
-from src.colony.isa import build_ancestor
+from src.colony.isa import Op, build_ancestor
 from src.colony.mutation import RandomMutator, parse_genome
 from src.colony.world import World, WorldConfig
 from src.colony.live import Habitat
@@ -49,6 +49,14 @@ def test_live_habitat_restores_checkpoint(tmp_path):
     assert restored.snapshot()["population"] == len(restored.colony.organisms)
 
 
+def test_extinction_releases_old_colony_and_seeds_one_new_epoch(tmp_path):
+    habitat = Habitat(tmp_path / "extinction.pkl", founders=2, physical=False)
+    habitat.colony.organisms.clear()
+    habitat.step()
+    assert habitat.epoch == 2
+    assert len(habitat.colony.organisms) == 2
+
+
 def test_odin_operator_queues_and_consumes_authored_variant(tmp_path):
     mutator = OdinMutator(tmp_path, rate=1.0, energy_cost=1.0)
     mutator.base.point_rate = 0
@@ -66,3 +74,33 @@ def test_odin_operator_queues_and_consumes_authored_variant(tmp_path):
     assert proposal != original
     assert mutator.accepted == 1
     assert not (tmp_path / "proposal.json").exists()
+
+
+def test_ecology_instructions_enable_communication_construction_and_parasitism():
+    world = World(WorldConfig(width=4, height=4, memory_cap=500, seed=3))
+    colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
+                    seed=3, founders=2)
+    sender, receiver = colony.organisms
+    sender.x = receiver.x = 1
+    sender.y = receiver.y = 1
+
+    sender.genome, sender.a = [Op.SIGNAL], 73
+    sender.execute(colony)
+    receiver.genome = [Op.LISTEN]
+    receiver.execute(colony)
+    assert receiver.a == 73
+
+    sender.genome, sender.energy = [Op.BUILD], 20
+    sender.execute(colony)
+    assert world.structures[1][1] == 1
+
+    sender.genome, sender.b = [Op.PEEK], 0
+    receiver.genome = [Op.NAND, Op.OUTPUT]
+    sender.execute(colony)
+    assert sender.a == Op.NAND
+
+    sender.genome = [Op.COPYN]
+    sender.child, sender.copy_index = [], 0
+    sender.execute(colony)
+    assert sender.child == [Op.NAND]
+    assert colony.foreign_copies == 1

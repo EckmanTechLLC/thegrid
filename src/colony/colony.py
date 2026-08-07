@@ -26,6 +26,8 @@ class Colony:
         self.deaths = 0
         self.deaths_by_cause: Counter = Counter()
         self.task_firsts: dict[str, int] = {}
+        self.neighbor_reads = 0
+        self.foreign_copies = 0
         ancestor = build_ancestor()
         for lineage in range(founders):
             if not self.world.request_memory(len(ancestor)):
@@ -86,6 +88,17 @@ class Colony:
 
     def note_task(self, name: str) -> None:
         self.task_firsts.setdefault(name, self.world.tick)
+
+    def neighbor(self, organism: Organism) -> Organism | None:
+        width, height = self.world.config.width, self.world.config.height
+        for other in self.organisms:
+            if other is organism:
+                continue
+            dx = min((other.x - organism.x) % width, (organism.x - other.x) % width)
+            dy = min((other.y - organism.y) % height, (organism.y - other.y) % height)
+            if dx + dy <= 1:
+                return other
+        return None
 
     def dominant_genome(self) -> tuple[list[int], int]:
         if not self.organisms:

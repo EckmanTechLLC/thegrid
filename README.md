@@ -26,6 +26,12 @@ The service has finite cgroup v2 CPU/RAM bounds; genome reservations commit real
 resident pages, and thermal pressure is read from the AMD Tctl sensor. Mutation
 requests are queued for Odin to author rather than sent to an API model.
 
+The evolvable ISA also permits local signalling, listening, niche construction,
+neighbour-genome inspection, and foreign-genome copying. Resource-rich climate
+quadrants move over time, creating changing selection pressure. These mechanisms
+permit cooperation, cheating, parasitism, defense, and ecological inheritance;
+none of those outcomes is hard-coded.
+
 For a foreground development run:
 
 ```bash

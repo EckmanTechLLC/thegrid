@@ -154,10 +154,20 @@ class SubstrateWorld(World):
         # Tile chemistry remains part of the habitat, but memory, scheduler
         # time, and thermal pressure are taken directly from Linux/hardware.
         c = self.config
-        for row in self.energy:
+        phase = (self.tick // 2000) % 4
+        for y, row in enumerate(self.energy):
             for x in range(c.width):
                 if row[x] < c.tile_capacity:
-                    row[x] = min(c.tile_capacity, row[x] + c.tile_regen)
+                    quadrant = (x >= c.width // 2) + 2 * (y >= c.height // 2)
+                    climate = 1.8 if quadrant == phase else 0.55
+                    construction = self.structures[y][x] * 0.003
+                    row[x] = min(c.tile_capacity, row[x] + c.tile_regen * climate + construction)
+                if self.signal_strength[y][x] > 0:
+                    self.signal_strength[y][x] -= 1
+                    if self.signal_strength[y][x] == 0:
+                        self.signals[y][x] = 0
+                if self.tick and self.tick % 500 == 0 and self.structures[y][x] > 0:
+                    self.structures[y][x] -= 1
         self.instructions_this_tick = 0
         self.tick += 1
 

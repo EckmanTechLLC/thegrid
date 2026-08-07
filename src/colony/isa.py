@@ -23,6 +23,11 @@ class Op(IntEnum):
     OUTPUT = 15
     IFZERO = 16
     PUSH = 17
+    SIGNAL = 18
+    LISTEN = 19
+    BUILD = 20
+    PEEK = 21
+    COPYN = 22
 
 
 @dataclass(frozen=True)
@@ -51,6 +56,11 @@ ISA = [
     Instruction("output", 0.35, "submit A to the task environment"),
     Instruction("ifzero", 0.20, "skip next instruction unless A is zero"),
     Instruction("push", 0.20, "copy A into C"),
+    Instruction("signal", 0.45, "broadcast A locally for other organisms"),
+    Instruction("listen", 0.30, "read the strongest local signal into A"),
+    Instruction("build", 1.00, "spend energy improving the current resource patch"),
+    Instruction("peek", 0.55, "read a neighbouring genome word into A"),
+    Instruction("copyn", 0.65, "copy a neighbouring genome word into the child"),
 ]
 
 NUM_OPS = len(ISA)
