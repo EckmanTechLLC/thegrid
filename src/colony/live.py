@@ -9,6 +9,7 @@ import gc
 import json
 import os
 import pickle
+import shutil
 import signal
 import time
 from collections import Counter, deque
@@ -19,7 +20,7 @@ from aiohttp import web
 from .colony import Colony
 from .isa import ISA, build_ancestor
 from .odin_operator import OdinMutator
-from .record import encode_energy, encode_genome, encode_positions
+from .record import ALPHABET, encode_energy, encode_genome, encode_positions
 from .tasks import TaskEnvironment
 from .substrate import SubstrateWorld
 from .world import WorldConfig
@@ -93,6 +94,8 @@ class Habitat:
                          "events": list(self.events)}, handle)
             handle.flush()
             os.fsync(handle.fileno())
+        if self.state_path.exists():
+            shutil.copy2(self.state_path, self.state_path.with_suffix(".previous.pkl"))
         temporary.replace(self.state_path)
 
     def step(self) -> None:
@@ -131,6 +134,7 @@ class Habitat:
         genome, carriers = colony.dominant_genome()
         strains = Counter(o.lineage for o in colony.organisms)
         return {
+            "sampledAt": time.time(),
             "epoch": self.epoch, "startedAt": self.started_at,
             "width": world.config.width, "height": world.config.height,
             "tick": world.tick, "population": len(colony.organisms),
@@ -152,6 +156,10 @@ class Habitat:
             "climatePhase": (world.tick // 2000) % 4,
             "activeSignals": sum(value > 0 for row in world.signal_strength for value in row),
             "builtTiles": sum(value > 0 for row in world.structures for value in row),
+            "signalField": "".join("0123456789abc"[min(12, value)]
+                                   for row in world.signal_strength for value in row),
+            "structureField": "".join(ALPHABET[min(31, value)]
+                                      for row in world.structures for value in row),
             "neighborReads": colony.neighbor_reads,
             "foreignCopies": colony.foreign_copies,
             "events": list(self.events),
@@ -161,7 +169,7 @@ class Habitat:
 async def run_habitat(habitat: Habitat, ticks_per_second: int) -> None:
     interval = 0.1
     batch = max(1, ticks_per_second // 10)
-    saves = 0
+    last_save = time.monotonic()
     while habitat.running:
         before = time.monotonic()
         def advance() -> None:
@@ -170,11 +178,12 @@ async def run_habitat(habitat: Habitat, ticks_per_second: int) -> None:
         # The VM can consume its full cgroup slice without blocking HTTP.
         await asyncio.to_thread(advance)
         habitat.latest = habitat.snapshot()
-        saves += batch
-        if saves >= 1000:
+        if time.monotonic() - last_save >= 60:
             await asyncio.to_thread(habitat.save)
-            saves = 0
-        delay = interval - (time.monotonic() - before)
+            last_save = time.monotonic()
+        temperature = habitat.colony.world.heat
+        thermal_rest = 5.0 if temperature >= 95.0 else (1.0 if temperature >= 90.0 else 0.0)
+        delay = interval + thermal_rest - (time.monotonic() - before)
         if delay > 0:
             await asyncio.sleep(delay)
         else:
@@ -189,6 +198,10 @@ async def create_app(habitat: Habitat, ticks_per_second: int) -> web.Application
 
     async def start(app: web.Application) -> None:
         app["runner"] = asyncio.create_task(run_habitat(habitat, ticks_per_second))
+        def restart_on_failure(task: asyncio.Task) -> None:
+            if habitat.running and not task.cancelled() and task.exception() is not None:
+                os._exit(70)
+        app["runner"].add_done_callback(restart_on_failure)
 
     async def stop(app: web.Application) -> None:
         habitat.running = False

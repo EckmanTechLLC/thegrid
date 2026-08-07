@@ -32,6 +32,11 @@ quadrants move over time, creating changing selection pressure. These mechanisms
 permit cooperation, cheating, parasitism, defense, and ecological inheritance;
 none of those outcomes is hard-coded.
 
+The live map tints constructed patches green and active signals cyan. Runtime
+state is checkpointed every 60 seconds with one previous generation retained.
+The simulation worker is fail-fast under systemd supervision, slows above
+90°C, rests heavily above 95°C, and has a hard 5% CPU quota with swap disabled.
+
 For a foreground development run:
 
 ```bash

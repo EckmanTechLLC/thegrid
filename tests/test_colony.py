@@ -43,10 +43,14 @@ def test_live_habitat_restores_checkpoint(tmp_path):
     for _ in range(25):
         habitat.step()
     habitat.save()
+    habitat.save()
+    assert state.with_suffix(".previous.pkl").exists()
 
     restored = Habitat(state, physical=False)
     assert restored.colony.world.tick == 25
     assert restored.snapshot()["population"] == len(restored.colony.organisms)
+    assert len(restored.snapshot()["signalField"]) == 32 * 32
+    assert len(restored.snapshot()["structureField"]) == 32 * 32
 
 
 def test_extinction_releases_old_colony_and_seeds_one_new_epoch(tmp_path):
