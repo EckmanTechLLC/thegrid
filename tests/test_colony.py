@@ -2,6 +2,7 @@ from src.colony.colony import Colony
 from src.colony.isa import build_ancestor
 from src.colony.mutation import RandomMutator, parse_genome
 from src.colony.world import World, WorldConfig
+from src.colony.live import Habitat
 
 
 def test_ancestor_reproduces_and_memory_accounts():
@@ -30,3 +31,15 @@ def test_parse_genome_rejects_unknown_ops():
 def test_ancestor_is_valid():
     assert build_ancestor()
     assert all(isinstance(word, int) for word in build_ancestor())
+
+
+def test_live_habitat_restores_checkpoint(tmp_path):
+    state = tmp_path / "colony.pkl"
+    habitat = Habitat(state, seed=9, founders=2)
+    for _ in range(25):
+        habitat.step()
+    habitat.save()
+
+    restored = Habitat(state)
+    assert restored.colony.world.tick == 25
+    assert restored.snapshot()["population"] == len(restored.colony.organisms)

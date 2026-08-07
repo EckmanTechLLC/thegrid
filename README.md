@@ -17,6 +17,18 @@ python3 -m venv .venv
 .venv/bin/python -m src.colony.record --ticks 9000 --out run.html
 ```
 
+## Live habitat
+
+The persistent habitat runs continuously under the `thegrid-colony.service`
+user service. Its LAN observer is available on port 8787. State is checkpointed
+atomically to `~/.local/state/thegrid/colony.pkl` and restored after restarts.
+
+For a foreground development run:
+
+```bash
+.venv/bin/python -m src.colony.live --host 0.0.0.0 --port 8787
+```
+
 Use `--mutator fixture` to test the informed-mutation plumbing deterministically.
 The fixture is not evidence that an LLM improves evolution. Real model trials
 must be compared against seeded blind-mutation controls.
