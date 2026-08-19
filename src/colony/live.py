@@ -219,6 +219,36 @@ async def create_app(habitat: Habitat, ticks_per_second: int) -> web.Application
     app.router.add_get("/", lambda _: web.FileResponse(Path(__file__).with_name("live_viewer.html")))
     app.router.add_get("/api/state", lambda _: web.json_response(habitat.latest,
                                                                   dumps=lambda x: json.dumps(x, separators=(",", ":"))))
+
+    async def stream_state(request: web.Request) -> web.StreamResponse:
+        """Send each completed habitat tick to the observer without interpolation."""
+        response = web.StreamResponse(headers={
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        })
+        await response.prepare(request)
+        last_marker = None
+        last_keepalive = time.monotonic()
+        try:
+            while habitat.running:
+                state = habitat.latest
+                marker = (state["epoch"], state["tick"])
+                if marker != last_marker:
+                    payload = json.dumps(state, separators=(",", ":"))
+                    await response.write(f"data:{payload}\n\n".encode())
+                    last_marker = marker
+                    last_keepalive = time.monotonic()
+                elif time.monotonic() - last_keepalive >= 15:
+                    await response.write(b": keepalive\n\n")
+                    last_keepalive = time.monotonic()
+                await asyncio.sleep(0.02)
+        except (ConnectionError, RuntimeError):
+            pass
+        return response
+
+    app.router.add_get("/api/stream", stream_state)
     app.router.add_get("/api/history", lambda _: web.json_response(
         habitat.history.summary(habitat.epoch),
         dumps=lambda x: json.dumps(x, separators=(",", ":"))))

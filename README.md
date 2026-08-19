@@ -34,6 +34,9 @@ none of those outcomes is hard-coded.
 
 The live map tints constructed patches green and active signals cyan. Runtime
 state is checkpointed every 60 seconds with one previous generation retained.
+The observer receives a server-sent frame for every completed habitat tick and
+renders exact states without inventing interpolated positions; real thermal
+pauses therefore remain visible.
 Observer telemetry distinguishes all movement from `scan`-guided movement,
 records energy harvested after moving, and reports deaths by cause.
 The browser also exposes a durable digital fossil record backed by compact
