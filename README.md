@@ -39,6 +39,10 @@ renders exact states without inventing interpolated positions; real thermal
 pauses therefore remain visible.
 Observer telemetry distinguishes all movement from `scan`-guided movement,
 records energy harvested after moving, and reports deaths by cause.
+Click any occupied map tile to inspect its organisms. The inspector follows the
+selected organism across ticks and shows its active instruction, genome,
+registers, energy, age, lineage, reproduction progress, and behavior counters.
+If it dies while selected, the recent-death cache also reports the cause.
 The browser also exposes a durable digital fossil record backed by compact
 SQLite aggregates: new genomes, parent-to-child genome transitions, and epoch
 summaries. It preserves evolutionary history without storing one unbounded row

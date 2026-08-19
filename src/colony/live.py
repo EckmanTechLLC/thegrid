@@ -42,6 +42,9 @@ class Habitat:
         self.history.start_epoch(self.epoch, self.seed, self.started_at,
                                  self.colony.organisms, partial=True,
                                  observed_tick=self.colony.world.tick)
+        self.recent_deaths: deque[dict] = deque(maxlen=256)
+        self.organism_latest: dict[tuple[int, int], dict] = {}
+        self.tile_latest: dict[tuple[int, int], list[dict]] = {}
         self.running = True
         self._last_tasks = set(self.colony.task_firsts)
         self.latest = self.snapshot()
@@ -140,6 +143,12 @@ class Habitat:
             self.events.append({"tick": last_tick, "text": "colony became extinct; new epoch seeded"})
             self._last_tasks.clear()
         self.colony.step()
+        for event in self.colony.lifecycle_events:
+            if event["kind"] == "death":
+                self.recent_deaths.append(self._organism_detail(
+                    event["organism"], status="dead", cause=event["cause"],
+                    tick=event["tick"],
+                ))
         self.history.record(self.epoch, self.colony.lifecycle_events)
         self.colony.lifecycle_events.clear()
         for name, tick in self.colony.task_firsts.items():
@@ -151,6 +160,12 @@ class Habitat:
         colony, world = self.colony, self.colony.world
         genome, carriers = colony.dominant_genome()
         strains = Counter(o.lineage for o in colony.organisms)
+        details = [self._organism_detail(o, tick=world.tick) for o in colony.organisms]
+        self.organism_latest = {(self.epoch, item["id"]): item for item in details}
+        tiles: dict[tuple[int, int], list[dict]] = {}
+        for item in details:
+            tiles.setdefault((item["x"], item["y"]), []).append(item)
+        self.tile_latest = tiles
         return {
             "sampledAt": time.time(),
             "epoch": self.epoch, "startedAt": self.started_at,
@@ -187,6 +202,35 @@ class Habitat:
                                             for o in colony.organisms), 2),
             "deathsByCause": dict(colony.deaths_by_cause),
             "events": list(self.events),
+        }
+
+    def _organism_detail(self, organism, status: str = "alive", cause=None,
+                         tick: int | None = None) -> dict:
+        genome = list(organism.genome)
+        current = genome[organism.ip % len(genome)] if genome else None
+        return {
+            "epoch": self.epoch, "tick": tick, "status": status, "cause": cause,
+            "id": organism.id, "lineage": organism.lineage,
+            "x": organism.x, "y": organism.y,
+            "generation": organism.generation, "age": organism.age,
+            "energy": round(organism.energy, 2), "births": organism.births,
+            "ip": organism.ip, "currentInstruction": (
+                ISA[current].name if current is not None and 0 <= current < len(ISA) else None),
+            "genome": [ISA[word].name if 0 <= word < len(ISA) else f"?{word}"
+                       for word in genome],
+            "registers": {"a": organism.a, "b": organism.b, "c": organism.c},
+            "childProgress": (None if organism.child is None else {
+                "copied": organism.copy_index, "total": len(genome)}),
+            "harvested": round(organism.harvested, 2),
+            "tasks": dict(organism.tasks_solved),
+            "moves": getattr(organism, "moves", 0),
+            "scans": getattr(organism, "scans", 0),
+            "guidedMoves": getattr(organism, "guided_moves", 0),
+            "signals": getattr(organism, "signals_sent", 0),
+            "structures": getattr(organism, "structures_built", 0),
+            "neighborReads": getattr(organism, "neighbor_reads", 0),
+            "foreignCopies": getattr(organism, "foreign_copies", 0),
+            "scratch": list(getattr(organism, "scratch", [])) or None,
         }
 
 
@@ -249,6 +293,27 @@ async def create_app(habitat: Habitat, ticks_per_second: int) -> web.Application
         return response
 
     app.router.add_get("/api/stream", stream_state)
+
+    async def tile_organisms(request: web.Request) -> web.Response:
+        try:
+            x, y = int(request.query["x"]), int(request.query["y"])
+        except (KeyError, ValueError):
+            raise web.HTTPBadRequest(text="integer x and y are required")
+        return web.json_response({"epoch": habitat.epoch, "x": x, "y": y,
+                                  "organisms": habitat.tile_latest.get((x, y), [])})
+
+    async def organism_detail(request: web.Request) -> web.Response:
+        epoch, organism_id = int(request.match_info["epoch"]), int(request.match_info["organism_id"])
+        detail = habitat.organism_latest.get((epoch, organism_id))
+        if detail is None:
+            detail = next((item for item in reversed(habitat.recent_deaths)
+                           if item["epoch"] == epoch and item["id"] == organism_id), None)
+        if detail is None:
+            raise web.HTTPNotFound(text="organism is no longer in recent history")
+        return web.json_response(detail)
+
+    app.router.add_get("/api/organisms", tile_organisms)
+    app.router.add_get("/api/organism/{epoch:\\d+}/{organism_id:\\d+}", organism_detail)
     app.router.add_get("/api/history", lambda _: web.json_response(
         habitat.history.summary(habitat.epoch),
         dumps=lambda x: json.dumps(x, separators=(",", ":"))))

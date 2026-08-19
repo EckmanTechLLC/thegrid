@@ -175,3 +175,19 @@ def test_lineage_history_aggregates_genomes_transitions_and_epoch(tmp_path):
     history.finish_epoch(3, colony)
     assert history.summary(3)["epochs"][0]["ended_tick"] == colony.world.tick
     history.close()
+
+
+def test_live_inspector_tracks_current_organism_and_recent_death(tmp_path):
+    habitat = Habitat(tmp_path / "inspect.pkl", seed=14, founders=1, physical=False)
+    organism = habitat.colony.organisms[0]
+    detail = habitat.organism_latest[(habitat.epoch, organism.id)]
+    assert detail["status"] == "alive"
+    assert detail["currentInstruction"] == "harvest"
+    assert detail["genome"][0:2] == ["harvest", "harvest"]
+    organism.energy = -1_000_000
+    habitat.step()
+    dead = habitat.recent_deaths[-1]
+    assert dead["id"] == organism.id
+    assert dead["status"] == "dead"
+    assert dead["cause"] == "starvation"
+    habitat.history.close()
