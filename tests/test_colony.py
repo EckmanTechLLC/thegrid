@@ -177,6 +177,22 @@ def test_lineage_history_aggregates_genomes_transitions_and_epoch(tmp_path):
     history.close()
 
 
+def test_live_inspector_tracks_current_organism_and_recent_death(tmp_path):
+    habitat = Habitat(tmp_path / "inspect.pkl", seed=14, founders=1, physical=False)
+    organism = habitat.colony.organisms[0]
+    detail = habitat.organism_latest[(habitat.epoch, organism.id)]
+    assert detail["status"] == "alive"
+    assert detail["currentInstruction"] == "harvest"
+    assert detail["scratch"] == [0] * 8
+    organism.energy = -1_000_000
+    habitat.step()
+    dead = habitat.recent_deaths[-1]
+    assert dead["id"] == organism.id
+    assert dead["status"] == "dead"
+    assert dead["cause"] == "starvation"
+    habitat.history.close()
+
+
 def test_experimental_arithmetic_and_scratch_memory():
     colony = Colony(World(WorldConfig(width=4, height=4, memory_cap=100, seed=12)),
                     RandomMutator(point_rate=0, indel_rate=0), seed=12, founders=1)
