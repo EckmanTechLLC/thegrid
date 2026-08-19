@@ -28,6 +28,12 @@ class Op(IntEnum):
     BUILD = 20
     PEEK = 21
     COPYN = 22
+    ADD = 23
+    SUB = 24
+    XOR = 25
+    LOAD = 26
+    STORE = 27
+    JMPR = 28
 
 
 @dataclass(frozen=True)
@@ -61,6 +67,12 @@ ISA = [
     Instruction("build", 1.00, "spend energy improving the current resource patch"),
     Instruction("peek", 0.55, "read a neighbouring genome word into A"),
     Instruction("copyn", 0.65, "copy a neighbouring genome word into the child"),
+    Instruction("add", 0.30, "set A to A plus B modulo 256"),
+    Instruction("sub", 0.30, "set A to A minus B modulo 256"),
+    Instruction("xor", 0.30, "set A to bitwise A XOR B"),
+    Instruction("load", 0.35, "load scratch byte B modulo 8 into A"),
+    Instruction("store", 0.45, "store A in scratch byte B modulo 8"),
+    Instruction("jmpr", 0.30, "jump relative by C modulo 15 minus 7"),
 ]
 
 NUM_OPS = len(ISA)

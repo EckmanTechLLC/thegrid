@@ -175,3 +175,37 @@ def test_lineage_history_aggregates_genomes_transitions_and_epoch(tmp_path):
     history.finish_epoch(3, colony)
     assert history.summary(3)["epochs"][0]["ended_tick"] == colony.world.tick
     history.close()
+
+
+def test_experimental_arithmetic_and_scratch_memory():
+    colony = Colony(World(WorldConfig(width=4, height=4, memory_cap=100, seed=12)),
+                    RandomMutator(point_rate=0, indel_rate=0), seed=12, founders=1)
+    organism = colony.organisms[0]
+    organism.a, organism.b = 250, 10
+    organism.genome = [Op.ADD]
+    organism.execute(colony)
+    assert organism.a == 4
+    organism.genome = [Op.SUB]
+    organism.execute(colony)
+    assert organism.a == 250
+    organism.genome = [Op.XOR]
+    organism.execute(colony)
+    assert organism.a == (250 ^ 10)
+
+    organism.a, organism.b = 73, 3
+    organism.genome = [Op.STORE]
+    organism.execute(colony)
+    organism.a = 0
+    organism.genome = [Op.LOAD]
+    organism.execute(colony)
+    assert organism.a == 73
+
+
+def test_experimental_relative_jump_uses_register_c():
+    colony = Colony(World(WorldConfig(width=4, height=4, memory_cap=100, seed=13)),
+                    RandomMutator(point_rate=0, indel_rate=0), seed=13, founders=1)
+    organism = colony.organisms[0]
+    organism.genome = [Op.JMPR, Op.NOP, Op.NOP, Op.NOP]
+    organism.ip, organism.c = 0, 9
+    organism.execute(colony)
+    assert organism.ip == 2

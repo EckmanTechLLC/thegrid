@@ -8,6 +8,13 @@ it is not placed in every organism's thought loop.
 The repository also retains the original Phase 1 Aria/Flux prototype while the
 colony observation layer is integrated with its useful infrastructure.
 
+This `colony2-experimental` branch runs a separate computational habitat with
+six appended instructions: modular `add`/`sub`, bitwise `xor`, eight bytes of
+private scratch memory accessed through `load`/`store`, and a register-controlled
+relative jump. Existing instruction numbers are unchanged. The experimental
+service uses blind mutation initially so these capabilities must emerge through
+the substrate rather than authored proposals.
+
 ## Run the colony
 
 ```bash

@@ -39,6 +39,7 @@ class Organism:
     task_inputs_seen: int = 0
     scan_pending: bool = False
     awaiting_post_move_harvest: bool = False
+    scratch: list[int] = field(default_factory=lambda: [0] * 8)
 
     def telemetry(self) -> dict:
         return {
@@ -54,6 +55,7 @@ class Organism:
             "scans": getattr(self, "scans", 0),
             "guided_moves": getattr(self, "guided_moves", 0),
             "post_move_harvested": round(getattr(self, "post_move_harvested", 0.0), 2),
+            "scratch_nonzero": sum(value != 0 for value in getattr(self, "scratch", [])),
         }
 
     def execute(self, colony) -> None:
@@ -156,6 +158,22 @@ class Organism:
                 self.copy_index += 1
                 self.foreign_copies = getattr(self, "foreign_copies", 0) + 1
                 colony.foreign_copies += 1
+        elif op == Op.ADD:
+            self.a = (self.a + self.b) & 0xFF
+        elif op == Op.SUB:
+            self.a = (self.a - self.b) & 0xFF
+        elif op == Op.XOR:
+            self.a = (self.a ^ self.b) & 0xFF
+        elif op == Op.LOAD:
+            scratch = getattr(self, "scratch", [0] * 8)
+            self.a = scratch[self.b % len(scratch)]
+        elif op == Op.STORE:
+            scratch = getattr(self, "scratch", None)
+            if scratch is None:
+                self.scratch = scratch = [0] * 8
+            scratch[self.b % len(scratch)] = self.a & 0xFF
+        elif op == Op.JMPR:
+            next_ip = (self.ip + (self.c % 15) - 7) % len(self.genome)
         self.ip = next_ip
 
     def free_child(self, world) -> None:

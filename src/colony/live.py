@@ -29,11 +29,12 @@ from .world import WorldConfig
 
 class Habitat:
     def __init__(self, state_path: Path, seed: int = 42, founders: int = 6,
-                 physical: bool = True):
+                 physical: bool = True, mutator_kind: str = "odin"):
         self.state_path = state_path
         self.seed = seed
         self.founders = founders
         self.physical = physical
+        self.mutator_kind = mutator_kind
         self.epoch = 1
         self.started_at = time.time()
         self.events: deque[dict] = deque(maxlen=40)
@@ -49,7 +50,11 @@ class Habitat:
     def _new_colony(self) -> Colony:
         if self.physical:
             world = SubstrateWorld(WorldConfig(seed=self.seed))
-            mutator = OdinMutator(Path.home() / ".local/state/thegrid/operator")
+            if self.mutator_kind == "odin":
+                mutator = OdinMutator(self.state_path.parent / "operator")
+            else:
+                from .mutation import RandomMutator
+                mutator = RandomMutator()
         else:  # deterministic unit-test boundary; never used by the service
             from .mutation import RandomMutator
             from .world import World
@@ -69,8 +74,11 @@ class Habitat:
             colony = saved["colony"]
             if self.physical and not isinstance(colony.world, SubstrateWorld):
                 colony.world = SubstrateWorld.from_world(colony.world)
-            if self.physical and not isinstance(colony.mutator, OdinMutator):
-                colony.mutator = OdinMutator(Path.home() / ".local/state/thegrid/operator")
+            if self.physical and self.mutator_kind == "odin" and not isinstance(colony.mutator, OdinMutator):
+                colony.mutator = OdinMutator(self.state_path.parent / "operator")
+            elif self.physical and self.mutator_kind == "random" and isinstance(colony.mutator, OdinMutator):
+                from .mutation import RandomMutator
+                colony.mutator = RandomMutator()
             config = colony.world.config
             for name in ("signals", "signal_strength", "structures"):
                 if not hasattr(colony.world, name):
@@ -88,6 +96,8 @@ class Habitat:
                 for name in ("scan_pending", "awaiting_post_move_harvest"):
                     if not hasattr(organism, name):
                         setattr(organism, name, False)
+                if not hasattr(organism, "scratch"):
+                    organism.scratch = [0] * 8
             return colony
         except FileNotFoundError:
             return self._new_colony()
@@ -276,10 +286,11 @@ def main() -> None:
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--ticks-per-second", type=int, default=100)
+    parser.add_argument("--mutator", choices=("odin", "random"), default="odin")
     parser.add_argument("--state", type=Path,
                         default=Path.home() / ".local/state/thegrid/colony.pkl")
     args = parser.parse_args()
-    habitat = Habitat(args.state)
+    habitat = Habitat(args.state, mutator_kind=args.mutator)
     web.run_app(create_app(habitat, args.ticks_per_second), host=args.host,
                 port=args.port, print=None)
 
