@@ -18,7 +18,7 @@ from pathlib import Path
 from aiohttp import web
 
 from .colony import Colony
-from .history import LineageHistory
+from .history import LineageHistory, genome_id
 from .isa import ISA, build_ancestor
 from .odin_operator import OdinMutator
 from .record import ALPHABET, encode_energy, encode_genome, encode_positions
@@ -194,6 +194,7 @@ class Habitat:
             "substrate": "linux-cgroup-v2 + AMD k10temp" if self.physical else "test",
             "energy": encode_energy(world),
             "organisms": encode_positions(colony, world.config.width),
+            "genomeGlyphs": "".join(genome_id(o.genome)[0] for o in colony.organisms),
             "strains": [strains.get(i, 0) for i in range(self.founders)],
             "dominant": encode_genome(genome), "carriers": carriers,
             "isa": [item.name for item in ISA],
@@ -220,10 +221,12 @@ class Habitat:
     def _organism_detail(self, organism, status: str = "alive", cause=None,
                          tick: int | None = None) -> dict:
         genome = list(organism.genome)
+        identity = genome_id(genome)
         current = genome[organism.ip % len(genome)] if genome else None
         return {
             "epoch": self.epoch, "tick": tick, "status": status, "cause": cause,
             "id": organism.id, "lineage": organism.lineage,
+            "genomeId": identity, "genomeGlyph": identity[0],
             "x": organism.x, "y": organism.y,
             "generation": organism.generation, "age": organism.age,
             "energy": round(organism.energy, 2), "births": organism.births,

@@ -221,6 +221,9 @@ def test_live_inspector_tracks_current_organism_and_recent_death(tmp_path):
     assert detail["status"] == "alive"
     assert detail["currentInstruction"] == "harvest"
     assert detail["genome"][0:2] == ["harvest", "harvest"]
+    assert len(detail["genomeId"]) == 16
+    assert detail["genomeGlyph"] == detail["genomeId"][0]
+    assert len(habitat.latest["genomeGlyphs"]) == habitat.latest["population"]
     organism.energy = -1_000_000
     habitat.step()
     dead = habitat.recent_deaths[-1]
