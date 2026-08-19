@@ -5,6 +5,7 @@ from src.colony.world import World, WorldConfig
 from src.colony.live import Habitat
 from src.colony.odin_operator import OdinMutator
 from src.colony.organism import Organism
+from src.colony.history import LineageHistory
 import json
 import random
 
@@ -154,3 +155,23 @@ def test_movement_telemetry_distinguishes_guided_and_unguided_moves():
     assert organism.scans == 1
     assert organism.guided_moves == 1
     assert organism.post_move_harvested > 0
+
+
+def test_lineage_history_aggregates_genomes_transitions_and_epoch(tmp_path):
+    colony = Colony(World(WorldConfig(width=4, height=4, memory_cap=300, seed=8)),
+                    RandomMutator(point_rate=0, indel_rate=0), seed=8, founders=1)
+    history = LineageHistory(tmp_path / "history.sqlite3")
+    history.start_epoch(3, 8, 100.0)
+    history.record(3, colony.lifecycle_events)
+    colony.lifecycle_events.clear()
+    for _ in range(30):
+        colony.step()
+        history.record(3, colony.lifecycle_events)
+        colony.lifecycle_events.clear()
+    summary = history.summary(3)
+    assert summary["totals"]["genomes"] == 1
+    assert summary["totals"]["births"] > 1
+    assert summary["genomes"][0]["source"].startswith("harvest · harvest")
+    history.finish_epoch(3, colony)
+    assert history.summary(3)["epochs"][0]["ended_tick"] == colony.world.tick
+    history.close()

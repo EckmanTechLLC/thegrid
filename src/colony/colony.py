@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, deque
 import random
 
 from .isa import build_ancestor
@@ -28,15 +28,19 @@ class Colony:
         self.task_firsts: dict[str, int] = {}
         self.neighbor_reads = 0
         self.foreign_copies = 0
+        self.lifecycle_events = deque()
         ancestor = build_ancestor()
         for lineage in range(founders):
             if not self.world.request_memory(len(ancestor)):
                 break
-            self.organisms.append(Organism(
+            founder = Organism(
                 id=self._id(), genome=list(ancestor),
                 x=self.rng.randrange(self.world.config.width),
                 y=self.rng.randrange(self.world.config.height), lineage=lineage,
-            ))
+            )
+            self.organisms.append(founder)
+            self.lifecycle_events.append({"kind": "birth", "tick": self.world.tick,
+                                          "organism": founder, "parent": None})
 
     def _id(self) -> int:
         value = self.next_id
@@ -55,6 +59,8 @@ class Colony:
         for organism in self.organisms:
             cause = "starvation" if organism.energy <= 0 else ("senescence" if organism.age >= self.max_age else None)
             if cause:
+                self.lifecycle_events.append({"kind": "death", "tick": self.world.tick,
+                                              "organism": organism, "cause": cause})
                 organism.free_child(self.world)
                 self.world.release_memory(len(organism.genome))
                 self.deaths += 1
@@ -90,6 +96,8 @@ class Colony:
         parent.births += 1
         self.births += 1
         self.organisms.append(child)
+        self.lifecycle_events.append({"kind": "birth", "tick": self.world.tick,
+                                      "organism": child, "parent": parent})
 
     def note_task(self, name: str) -> None:
         self.task_firsts.setdefault(name, self.world.tick)

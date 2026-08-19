@@ -36,6 +36,10 @@ The live map tints constructed patches green and active signals cyan. Runtime
 state is checkpointed every 60 seconds with one previous generation retained.
 Observer telemetry distinguishes all movement from `scan`-guided movement,
 records energy harvested after moving, and reports deaths by cause.
+The browser also exposes a durable digital fossil record backed by compact
+SQLite aggregates: new genomes, parent-to-child genome transitions, and epoch
+summaries. It preserves evolutionary history without storing one unbounded row
+for every individual organism.
 The simulation worker is fail-fast under systemd supervision, slows above
 90°C, rests heavily above 95°C, and has a hard 5% CPU quota with swap disabled.
 

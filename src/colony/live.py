@@ -18,6 +18,7 @@ from pathlib import Path
 from aiohttp import web
 
 from .colony import Colony
+from .history import LineageHistory
 from .isa import ISA, build_ancestor
 from .odin_operator import OdinMutator
 from .record import ALPHABET, encode_energy, encode_genome, encode_positions
@@ -37,6 +38,10 @@ class Habitat:
         self.started_at = time.time()
         self.events: deque[dict] = deque(maxlen=40)
         self.colony = self._load_or_create()
+        self.history = LineageHistory(state_path.with_name("history.sqlite3"))
+        self.history.start_epoch(self.epoch, self.seed, self.started_at,
+                                 self.colony.organisms, partial=True,
+                                 observed_tick=self.colony.world.tick)
         self.running = True
         self._last_tasks = set(self.colony.task_firsts)
         self.latest = self.snapshot()
@@ -58,6 +63,7 @@ class Habitat:
             with self.state_path.open("rb") as handle:
                 saved = pickle.load(handle)
             self.epoch = int(saved.get("epoch", 1))
+            self.seed = int(saved.get("seed", self.seed + self.epoch - 1))
             self.started_at = float(saved.get("started_at", time.time()))
             self.events.extend(saved.get("events", []))
             colony = saved["colony"]
@@ -72,6 +78,7 @@ class Habitat:
                             [[0] * config.width for _ in range(config.height)])
             colony.neighbor_reads = getattr(colony, "neighbor_reads", 0)
             colony.foreign_copies = getattr(colony, "foreign_copies", 0)
+            colony.lifecycle_events = getattr(colony, "lifecycle_events", deque())
             for organism in colony.organisms:
                 for name in ("signals_sent", "structures_built", "neighbor_reads", "foreign_copies",
                              "moves", "scans", "guided_moves", "post_move_harvested",
@@ -91,10 +98,11 @@ class Habitat:
             return self._new_colony()
 
     def save(self) -> None:
+        self.history.flush()
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.state_path.with_suffix(".tmp")
         with temporary.open("wb") as handle:
-            pickle.dump({"colony": self.colony, "epoch": self.epoch,
+            pickle.dump({"colony": self.colony, "epoch": self.epoch, "seed": self.seed,
                          "started_at": self.started_at,
                          "events": list(self.events)}, handle)
             handle.flush()
@@ -105,6 +113,7 @@ class Habitat:
 
     def step(self) -> None:
         if not self.colony.organisms:
+            self.history.finish_epoch(self.epoch, self.colony)
             last_tick = self.colony.world.tick
             # Release the extinct population's real resident pages before
             # founders request memory from the same cgroup.
@@ -126,9 +135,13 @@ class Habitat:
                 os._exit(75)
             self.colony = replacement
             self.epoch += 1
+            self.history.start_epoch(self.epoch, self.seed, time.time(),
+                                     self.colony.organisms)
             self.events.append({"tick": last_tick, "text": "colony became extinct; new epoch seeded"})
             self._last_tasks.clear()
         self.colony.step()
+        self.history.record(self.epoch, self.colony.lifecycle_events)
+        self.colony.lifecycle_events.clear()
         for name, tick in self.colony.task_firsts.items():
             if name not in self._last_tasks:
                 self.events.append({"tick": tick, "text": f"{name} solved"})
@@ -206,6 +219,9 @@ async def create_app(habitat: Habitat, ticks_per_second: int) -> web.Application
     app.router.add_get("/", lambda _: web.FileResponse(Path(__file__).with_name("live_viewer.html")))
     app.router.add_get("/api/state", lambda _: web.json_response(habitat.latest,
                                                                   dumps=lambda x: json.dumps(x, separators=(",", ":"))))
+    app.router.add_get("/api/history", lambda _: web.json_response(
+        habitat.history.summary(habitat.epoch),
+        dumps=lambda x: json.dumps(x, separators=(",", ":"))))
 
     async def start(app: web.Application) -> None:
         app["runner"] = asyncio.create_task(run_habitat(habitat, ticks_per_second))
@@ -218,6 +234,7 @@ async def create_app(habitat: Habitat, ticks_per_second: int) -> web.Application
         habitat.running = False
         await app["runner"]
         habitat.save()
+        habitat.history.close()
 
     app.on_startup.append(start)
     app.on_cleanup.append(stop)
