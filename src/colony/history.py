@@ -42,6 +42,7 @@ class LineageHistory:
                 births INTEGER NOT NULL DEFAULT 0,
                 starvation_deaths INTEGER NOT NULL DEFAULT 0,
                 senescence_deaths INTEGER NOT NULL DEFAULT 0,
+                first_generation INTEGER,
                 max_generation INTEGER NOT NULL DEFAULT 0,
                 first_tick INTEGER NOT NULL,
                 last_tick INTEGER NOT NULL,
@@ -73,6 +74,11 @@ class LineageHistory:
             CREATE INDEX IF NOT EXISTS transitions_recent
                 ON transitions(epoch DESC, last_tick DESC);
         """)
+        columns = {row[1] for row in self._db.execute("PRAGMA table_info(genome_stats)")}
+        if "first_generation" not in columns:
+            self._db.execute("ALTER TABLE genome_stats ADD COLUMN first_generation INTEGER")
+            # Existing rows become conservative lower bounds measured from deployment.
+            self._db.execute("UPDATE genome_stats SET first_generation=max_generation")
         self._db.commit()
         self._last_commit = time.monotonic()
 
@@ -136,12 +142,13 @@ class LineageHistory:
             VALUES(?,?,?,?,?,?)
         """, (identity, encode_genome(genome), source, epoch, tick, parent_id))
         self._db.execute("""
-            INSERT INTO genome_stats(epoch,genome_id,max_generation,first_tick,last_tick)
-            VALUES(?,?,?,?,?)
+            INSERT INTO genome_stats(epoch,genome_id,first_generation,max_generation,first_tick,last_tick)
+            VALUES(?,?,?,?,?,?)
             ON CONFLICT(epoch,genome_id) DO UPDATE SET
+                first_generation=min(first_generation,excluded.first_generation),
                 max_generation=max(max_generation,excluded.max_generation),
                 last_tick=max(last_tick,excluded.last_tick)
-        """, (epoch, identity, generation, tick, tick))
+        """, (epoch, identity, generation, generation, tick, tick))
         return identity
 
     def finish_epoch(self, epoch: int, colony, extinct: bool = True) -> None:
@@ -186,14 +193,42 @@ class LineageHistory:
                 WHERE t.parent_genome_id != t.child_genome_id
                 ORDER BY t.epoch DESC,t.last_tick DESC LIMIT ?
             """, (limit,)).fetchall()
+            success_rows = self._db.execute("""
+                SELECT g.genome_id,g.source,g.parent_genome_id,s.births,
+                       s.first_tick,s.last_tick,s.first_generation,s.max_generation
+                FROM genome_stats s JOIN genomes g USING(genome_id)
+                WHERE s.epoch=? AND g.parent_genome_id IS NOT NULL
+                ORDER BY (s.max_generation-s.first_generation) DESC,
+                         s.births DESC,s.last_tick DESC LIMIT 100
+            """, (current_epoch,)).fetchall()
             epochs = self._db.execute("""
                 SELECT * FROM epochs ORDER BY epoch DESC LIMIT 8
             """).fetchall()
+        successes = []
+        for source_row in success_rows:
+            row = dict(source_row)
+            generations = row["max_generation"] - row["first_generation"]
+            births = row["births"]
+            if generations >= 100 and births >= 100:
+                tier = "established"
+            elif generations >= 50 and births >= 25:
+                tier = "enduring"
+            elif generations >= 10 and births >= 5:
+                tier = "growing"
+            elif births >= 2:
+                tier = "reproduced"
+            else:
+                tier = "new"
+            row.update({"observed_generations": generations,
+                        "age_ticks": row["last_tick"] - row["first_tick"],
+                        "tier": tier})
+            successes.append(row)
         return {
             "currentEpoch": current_epoch,
             "totals": dict(totals),
             "genomes": [dict(row) for row in genomes],
             "transitions": [dict(row) for row in transitions],
+            "mutationSuccess": successes[:limit],
             "epochs": [dict(row) for row in epochs],
         }
 
