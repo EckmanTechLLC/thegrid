@@ -15,11 +15,11 @@ PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=/home/etl/.local/state/thegrid-colony2
-MemoryMax=128M
-MemoryHigh=112M
+MemoryMax=192M
+MemoryHigh=176M
 MemorySwapMax=0
-CPUQuota=1%
-CPUWeight=2
+CPUQuota=5%
+CPUWeight=10
 
 [Install]
 WantedBy=default.target
