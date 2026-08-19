@@ -59,6 +59,10 @@ The browser also exposes a durable digital fossil record backed by compact
 SQLite aggregates: new genomes, parent-to-child genome transitions, and epoch
 summaries. It preserves evolutionary history without storing one unbounded row
 for every individual organism.
+The history API also ranks mutation establishment from exact-genome births and
+observed generation span (`new`, `reproduced`, `growing`, `enduring`, or
+`established`). Existing databases migrate in place and begin with conservative
+lower-bound generation spans; newly observed mutations are tracked from birth.
 The simulation worker is fail-fast under systemd supervision, slows above
 90°C, rests heavily above 95°C, and has a hard 5% CPU quota with swap disabled.
 

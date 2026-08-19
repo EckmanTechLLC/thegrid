@@ -8,6 +8,7 @@ from src.colony.organism import Organism
 from src.colony.history import LineageHistory
 import json
 import random
+from types import SimpleNamespace
 
 
 def test_ancestor_reproduces_and_memory_accounts():
@@ -174,6 +175,23 @@ def test_lineage_history_aggregates_genomes_transitions_and_epoch(tmp_path):
     assert summary["genomes"][0]["source"].startswith("harvest · harvest")
     history.finish_epoch(3, colony)
     assert history.summary(3)["epochs"][0]["ended_tick"] == colony.world.tick
+    history.close()
+
+
+def test_lineage_history_ranks_mutation_establishment(tmp_path):
+    history = LineageHistory(tmp_path / "success.sqlite3")
+    history.start_epoch(1, 1, 100.0)
+    ancestor = SimpleNamespace(genome=[Op.HARVEST])
+    for index, generation in enumerate((5, 7, 9, 12, 15)):
+        organism = SimpleNamespace(genome=[Op.MOVE], generation=generation)
+        parent = ancestor if index == 0 else SimpleNamespace(genome=[Op.MOVE])
+        history.record(1, [{"kind": "birth", "tick": 10 + index,
+                            "organism": organism, "parent": parent}])
+    success = history.summary(1)["mutationSuccess"][0]
+    assert success["births"] == 5
+    assert success["observed_generations"] == 10
+    assert success["age_ticks"] == 4
+    assert success["tier"] == "growing"
     history.close()
 
 
