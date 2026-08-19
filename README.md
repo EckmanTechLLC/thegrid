@@ -34,8 +34,15 @@ none of those outcomes is hard-coded.
 
 The live map tints constructed patches green and active signals cyan. Runtime
 state is checkpointed every 60 seconds with one previous generation retained.
+Observer telemetry distinguishes all movement from `scan`-guided movement,
+records energy harvested after moving, and reports deaths by cause.
 The simulation worker is fail-fast under systemd supervision, slows above
 90°C, rests heavily above 95°C, and has a hard 5% CPU quota with swap disabled.
+
+Computational-task rewards require both fresh environmental inputs and consume
+the challenge on the first output attempt. Outputs made without reading a fresh
+pair receive no reward, preventing constant-register programs from farming the
+default input state.
 
 For a foreground development run:
 

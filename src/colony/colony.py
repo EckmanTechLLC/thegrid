@@ -44,7 +44,12 @@ class Colony:
         return value
 
     def step(self) -> None:
-        for organism in list(self.organisms):
+        # Rotate the first execution slot so birth order does not permanently
+        # decide who harvests a contested tile first. Unlike shuffling, this
+        # does not consume the evolutionary RNG stream.
+        current = list(self.organisms)
+        offset = self.world.tick % len(current) if current else 0
+        for organism in current[offset:] + current[:offset]:
             organism.execute(self)
         survivors = []
         for organism in self.organisms:

@@ -108,3 +108,49 @@ def test_ecology_instructions_enable_communication_construction_and_parasitism()
     sender.execute(colony)
     assert sender.child == [Op.NAND]
     assert colony.foreign_copies == 1
+
+
+def test_task_reward_requires_two_fresh_inputs_and_is_single_use():
+    colony = Colony(World(WorldConfig(width=4, height=4, memory_cap=100, seed=5)),
+                    RandomMutator(point_rate=0, indel_rate=0), seed=5, founders=1)
+    organism = colony.organisms[0]
+    organism.genome = [Op.OUTPUT]
+    before = organism.energy
+    organism.execute(colony)
+    assert organism.energy < before
+    assert organism.tasks_solved == {}
+
+    organism.genome = [Op.INPUT]
+    organism.execute(colony)
+    organism.execute(colony)
+    organism.a = organism.last_inputs[0] & organism.last_inputs[1]
+    organism.genome = [Op.OUTPUT]
+    before = organism.energy
+    organism.execute(colony)
+    rewarded = organism.energy
+    assert rewarded > before
+    assert organism.tasks_solved == {"and": 1}
+    organism.execute(colony)
+    assert organism.energy < rewarded
+    assert organism.tasks_solved == {"and": 1}
+
+
+def test_movement_telemetry_distinguishes_guided_and_unguided_moves():
+    colony = Colony(World(WorldConfig(width=4, height=4, memory_cap=100, seed=6)),
+                    RandomMutator(point_rate=0, indel_rate=0), seed=6, founders=1)
+    organism = colony.organisms[0]
+    organism.genome = [Op.MOVE]
+    organism.execute(colony)
+    assert organism.moves == 1
+    assert organism.guided_moves == 0
+
+    organism.genome = [Op.SCAN]
+    organism.execute(colony)
+    organism.genome = [Op.MOVE]
+    organism.execute(colony)
+    organism.genome = [Op.HARVEST]
+    organism.execute(colony)
+    assert organism.moves == 2
+    assert organism.scans == 1
+    assert organism.guided_moves == 1
+    assert organism.post_move_harvested > 0

@@ -73,9 +73,14 @@ class Habitat:
             colony.neighbor_reads = getattr(colony, "neighbor_reads", 0)
             colony.foreign_copies = getattr(colony, "foreign_copies", 0)
             for organism in colony.organisms:
-                for name in ("signals_sent", "structures_built", "neighbor_reads", "foreign_copies"):
+                for name in ("signals_sent", "structures_built", "neighbor_reads", "foreign_copies",
+                             "moves", "scans", "guided_moves", "post_move_harvested",
+                             "task_inputs_seen"):
                     if not hasattr(organism, name):
                         setattr(organism, name, 0)
+                for name in ("scan_pending", "awaiting_post_move_harvest"):
+                    if not hasattr(organism, name):
+                        setattr(organism, name, False)
             return colony
         except FileNotFoundError:
             return self._new_colony()
@@ -162,6 +167,12 @@ class Habitat:
                                       for row in world.structures for value in row),
             "neighborReads": colony.neighbor_reads,
             "foreignCopies": colony.foreign_copies,
+            "moves": sum(getattr(o, "moves", 0) for o in colony.organisms),
+            "scans": sum(getattr(o, "scans", 0) for o in colony.organisms),
+            "guidedMoves": sum(getattr(o, "guided_moves", 0) for o in colony.organisms),
+            "postMoveHarvested": round(sum(getattr(o, "post_move_harvested", 0.0)
+                                            for o in colony.organisms), 2),
+            "deathsByCause": dict(colony.deaths_by_cause),
             "events": list(self.events),
         }
 

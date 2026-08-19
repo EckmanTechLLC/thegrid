@@ -32,6 +32,13 @@ class Organism:
     structures_built: int = 0
     neighbor_reads: int = 0
     foreign_copies: int = 0
+    moves: int = 0
+    scans: int = 0
+    guided_moves: int = 0
+    post_move_harvested: float = 0.0
+    task_inputs_seen: int = 0
+    scan_pending: bool = False
+    awaiting_post_move_harvest: bool = False
 
     def telemetry(self) -> dict:
         return {
@@ -43,6 +50,10 @@ class Organism:
             "structures_built": getattr(self, "structures_built", 0),
             "neighbor_reads": getattr(self, "neighbor_reads", 0),
             "foreign_copies": getattr(self, "foreign_copies", 0),
+            "moves": getattr(self, "moves", 0),
+            "scans": getattr(self, "scans", 0),
+            "guided_moves": getattr(self, "guided_moves", 0),
+            "post_move_harvested": round(getattr(self, "post_move_harvested", 0.0), 2),
         }
 
     def execute(self, colony) -> None:
@@ -60,12 +71,22 @@ class Organism:
             gained = colony.world.harvest(self.x, self.y)
             self.energy += gained
             self.harvested += gained
+            if getattr(self, "awaiting_post_move_harvest", False):
+                self.post_move_harvested = getattr(self, "post_move_harvested", 0.0) + gained
+                self.awaiting_post_move_harvest = False
         elif op == Op.SCAN:
             options = [(0, -1), (1, 0), (0, 1), (-1, 0)]
             self.a = max(range(4), key=lambda i: colony.world.tile_energy(self.x + options[i][0], self.y + options[i][1]))
+            self.scans = getattr(self, "scans", 0) + 1
+            self.scan_pending = True
         elif op == Op.MOVE:
             dx, dy = [(0, -1), (1, 0), (0, 1), (-1, 0)][self.a % 4]
             self.x, self.y = colony.world.wrap(self.x + dx, self.y + dy)
+            self.moves = getattr(self, "moves", 0) + 1
+            if getattr(self, "scan_pending", False):
+                self.guided_moves = getattr(self, "guided_moves", 0) + 1
+            self.scan_pending = False
+            self.awaiting_post_move_harvest = True
         elif op == Op.ALLOC and self.child is None:
             if colony.world.request_memory(len(self.genome)):
                 self.child, self.copy_index = [], 0
@@ -89,12 +110,20 @@ class Organism:
         elif op == Op.INPUT:
             if self.input_index == 0:
                 self.last_inputs = colony.tasks.inputs(colony.world.tick, self.id)
+                self.task_inputs_seen = 0
             self.a = self.last_inputs[self.input_index % 2]
-            self.input_index += 1
+            self.input_index = (self.input_index + 1) % 2
+            self.task_inputs_seen = getattr(self, "task_inputs_seen", 0) + 1
         elif op == Op.NAND:
             self.a = (~(self.a & self.b)) & 0xFF
         elif op == Op.OUTPUT:
-            name, reward = colony.tasks.evaluate(self.a, self.last_inputs)
+            # A task challenge is valid only after both fresh inputs have been
+            # read, and every challenge can be submitted at most once.
+            if getattr(self, "task_inputs_seen", 0) < 2:
+                name, reward = None, 0.0
+            else:
+                name, reward = colony.tasks.evaluate(self.a, self.last_inputs)
+                self.task_inputs_seen = 0
             if name:
                 self.energy += reward
                 self.tasks_solved[name] = self.tasks_solved.get(name, 0) + 1
