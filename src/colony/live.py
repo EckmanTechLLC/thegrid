@@ -160,6 +160,19 @@ class Habitat:
         colony, world = self.colony, self.colony.world
         genome, carriers = colony.dominant_genome()
         strains = Counter(o.lineage for o in colony.organisms)
+        population = len(colony.organisms)
+        diversity = len({tuple(o.genome) for o in colony.organisms})
+        average_genome_length = (sum(len(o.genome) for o in colony.organisms) / population
+                                 if population else 0.0)
+        active_signals = sum(value > 0 for row in world.signal_strength for value in row)
+        built_tiles = sum(value > 0 for row in world.structures for value in row)
+        self.history.record_ecology(
+            self.epoch, world.tick, population=population, diversity=diversity,
+            dominance=carriers / population if population else 0.0,
+            genome_length=average_genome_length,
+            resources=world.total_energy() / (world.config.width * world.config.height),
+            built=built_tiles, signals=active_signals,
+        )
         details = [self._organism_detail(o, tick=world.tick) for o in colony.organisms]
         self.organism_latest = {(self.epoch, item["id"]): item for item in details}
         tiles: dict[tuple[int, int], list[dict]] = {}
@@ -170,7 +183,7 @@ class Habitat:
             "sampledAt": time.time(),
             "epoch": self.epoch, "startedAt": self.started_at,
             "width": world.config.width, "height": world.config.height,
-            "tick": world.tick, "population": len(colony.organisms),
+            "tick": world.tick, "population": population,
             "generation": max((o.generation for o in colony.organisms), default=0),
             "births": colony.births, "deaths": colony.deaths,
             "memory": round(world.memory_pressure, 4), "heat": round(world.heat, 2),
@@ -187,8 +200,8 @@ class Habitat:
             "ancestor": encode_genome(build_ancestor()),
             "tasks": colony.task_firsts,
             "climatePhase": (world.tick // 2000) % 4,
-            "activeSignals": sum(value > 0 for row in world.signal_strength for value in row),
-            "builtTiles": sum(value > 0 for row in world.structures for value in row),
+            "activeSignals": active_signals,
+            "builtTiles": built_tiles,
             "signalField": "".join("0123456789abc"[min(12, value)]
                                    for row in world.signal_strength for value in row),
             "structureField": "".join(ALPHABET[min(31, value)]

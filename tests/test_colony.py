@@ -195,6 +195,25 @@ def test_lineage_history_ranks_mutation_establishment(tmp_path):
     history.close()
 
 
+def test_lineage_history_compacts_ecology_into_tick_buckets(tmp_path):
+    history = LineageHistory(tmp_path / "ecology.sqlite3")
+    history.start_epoch(1, 1, 100.0)
+    metrics = dict(diversity=3, dominance=0.5, genome_length=11.0,
+                   resources=2.5, built=1, signals=2)
+    history.record_ecology(1, 10, population=10, **metrics)
+    history.record_ecology(1, 20, population=20, **metrics)
+    history.record_ecology(1, 20, population=20, **metrics)
+    history.record_ecology(1, 510, population=30, **metrics)
+    ecology = history.summary(1)["ecology"]
+    assert len(ecology) == 2
+    assert ecology[0]["samples"] == 2
+    assert ecology[0]["population_avg"] == 15
+    assert ecology[0]["population_min"] == 10
+    assert ecology[0]["population_max"] == 20
+    assert ecology[1]["population_avg"] == 30
+    history.close()
+
+
 def test_live_inspector_tracks_current_organism_and_recent_death(tmp_path):
     habitat = Habitat(tmp_path / "inspect.pkl", seed=14, founders=1, physical=False)
     organism = habitat.colony.organisms[0]
