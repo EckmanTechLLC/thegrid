@@ -15,6 +15,12 @@ relative jump. Existing instruction numbers are unchanged. The experimental
 service uses blind mutation initially so these capabilities must emerge through
 the substrate rather than authored proposals.
 
+The installed colony-two observer listens on LAN port 8788. Its state, history,
+and mutation queue live under `~/.local/state/thegrid-colony2`, wholly separate
+from epoch 1207. The service is limited to 1% CPU, 128 MiB RSS, and zero swap;
+at that isolation level its live tick rate is intentionally slower than colony
+one's.
+
 ## Run the colony
 
 ```bash
