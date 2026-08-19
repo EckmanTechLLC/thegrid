@@ -63,6 +63,10 @@ The history API also ranks mutation establishment from exact-genome births and
 observed generation span (`new`, `reproduced`, `growing`, `enduring`, or
 `established`). Existing databases migrate in place and begin with conservative
 lower-bound generation spans; newly observed mutations are tracked from birth.
+Compact 500-tick ecology buckets retain population average/range, genome
+diversity and length, dominant-genome share, mean resources, built patches, and
+active signals. The history API returns the latest 24 buckets without storing
+every rendered frame.
 The simulation worker is fail-fast under systemd supervision, slows above
 90°C, rests heavily above 95°C, and has a hard 5% CPU quota with swap disabled.
 

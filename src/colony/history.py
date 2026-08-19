@@ -19,6 +19,8 @@ def genome_id(genome: list[int]) -> str:
 class LineageHistory:
     """Aggregate ancestry without retaining an unbounded row per organism."""
 
+    ECOLOGY_BUCKET_TICKS = 500
+
     def __init__(self, path: Path):
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
@@ -69,6 +71,23 @@ class LineageHistory:
                 extinct INTEGER NOT NULL DEFAULT 0,
                 partial INTEGER NOT NULL DEFAULT 0
             );
+            CREATE TABLE IF NOT EXISTS ecology_buckets (
+                epoch INTEGER NOT NULL,
+                bucket INTEGER NOT NULL,
+                start_tick INTEGER NOT NULL,
+                end_tick INTEGER NOT NULL,
+                samples INTEGER NOT NULL,
+                population_sum INTEGER NOT NULL,
+                population_min INTEGER NOT NULL,
+                population_max INTEGER NOT NULL,
+                diversity_sum INTEGER NOT NULL,
+                dominance_sum REAL NOT NULL,
+                genome_length_sum REAL NOT NULL,
+                resource_sum REAL NOT NULL,
+                built_sum INTEGER NOT NULL,
+                signals_sum INTEGER NOT NULL,
+                PRIMARY KEY (epoch, bucket)
+            );
             CREATE INDEX IF NOT EXISTS genomes_first_seen
                 ON genomes(first_epoch DESC, first_tick DESC);
             CREATE INDEX IF NOT EXISTS transitions_recent
@@ -81,6 +100,7 @@ class LineageHistory:
             self._db.execute("UPDATE genome_stats SET first_generation=max_generation")
         self._db.commit()
         self._last_commit = time.monotonic()
+        self._last_ecology_tick: dict[int, int] = {}
 
     def start_epoch(self, epoch: int, seed: int, started_at: float,
                     organisms=(), partial: bool = False, observed_tick: int = 0) -> None:
@@ -164,6 +184,42 @@ class LineageHistory:
                   maximum, int(extinct), epoch))
             self._db.commit()
 
+    def record_ecology(self, epoch: int, tick: int, *, population: int,
+                       diversity: int, dominance: float, genome_length: float,
+                       resources: float, built: int, signals: int) -> None:
+        """Store bounded per-500-tick ecology aggregates, never per-frame rows."""
+        with self._lock:
+            if epoch not in self._last_ecology_tick:
+                row = self._db.execute(
+                    "SELECT coalesce(max(end_tick),-1) FROM ecology_buckets WHERE epoch=?",
+                    (epoch,),
+                ).fetchone()
+                self._last_ecology_tick[epoch] = int(row[0])
+            if tick <= self._last_ecology_tick[epoch]:
+                return
+            bucket = tick // self.ECOLOGY_BUCKET_TICKS
+            self._db.execute("""
+                INSERT INTO ecology_buckets(
+                    epoch,bucket,start_tick,end_tick,samples,population_sum,
+                    population_min,population_max,diversity_sum,dominance_sum,
+                    genome_length_sum,resource_sum,built_sum,signals_sum)
+                VALUES(?,?,?,?,1,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(epoch,bucket) DO UPDATE SET
+                    end_tick=excluded.end_tick,
+                    samples=samples+1,
+                    population_sum=population_sum+excluded.population_sum,
+                    population_min=min(population_min,excluded.population_min),
+                    population_max=max(population_max,excluded.population_max),
+                    diversity_sum=diversity_sum+excluded.diversity_sum,
+                    dominance_sum=dominance_sum+excluded.dominance_sum,
+                    genome_length_sum=genome_length_sum+excluded.genome_length_sum,
+                    resource_sum=resource_sum+excluded.resource_sum,
+                    built_sum=built_sum+excluded.built_sum,
+                    signals_sum=signals_sum+excluded.signals_sum
+            """, (epoch, bucket, tick, tick, population, population, population,
+                  diversity, dominance, genome_length, resources, built, signals))
+            self._last_ecology_tick[epoch] = tick
+
     def flush(self) -> None:
         with self._lock:
             self._db.commit()
@@ -204,6 +260,10 @@ class LineageHistory:
             epochs = self._db.execute("""
                 SELECT * FROM epochs ORDER BY epoch DESC LIMIT 8
             """).fetchall()
+            ecology_rows = self._db.execute("""
+                SELECT * FROM ecology_buckets WHERE epoch=?
+                ORDER BY bucket DESC LIMIT 24
+            """, (current_epoch,)).fetchall()
         successes = []
         for source_row in success_rows:
             row = dict(source_row)
@@ -223,12 +283,28 @@ class LineageHistory:
                         "age_ticks": row["last_tick"] - row["first_tick"],
                         "tier": tier})
             successes.append(row)
+        ecology = []
+        for source_row in reversed(ecology_rows):
+            row = dict(source_row)
+            samples = row.pop("samples")
+            row.update({
+                "samples": samples,
+                "population_avg": round(row.pop("population_sum") / samples, 2),
+                "diversity_avg": round(row.pop("diversity_sum") / samples, 2),
+                "dominance_avg": round(row.pop("dominance_sum") / samples, 4),
+                "genome_length_avg": round(row.pop("genome_length_sum") / samples, 2),
+                "resources_avg": round(row.pop("resource_sum") / samples, 2),
+                "built_avg": round(row.pop("built_sum") / samples, 2),
+                "signals_avg": round(row.pop("signals_sum") / samples, 2),
+            })
+            ecology.append(row)
         return {
             "currentEpoch": current_epoch,
             "totals": dict(totals),
             "genomes": [dict(row) for row in genomes],
             "transitions": [dict(row) for row in transitions],
             "mutationSuccess": successes[:limit],
+            "ecology": ecology,
             "epochs": [dict(row) for row in epochs],
         }
 
