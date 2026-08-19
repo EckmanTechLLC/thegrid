@@ -270,6 +270,10 @@ async def create_app(habitat: Habitat, ticks_per_second: int) -> web.Application
                 os._exit(70)
         app["runner"].add_done_callback(restart_on_failure)
 
+    async def begin_shutdown(app: web.Application) -> None:
+        # Stop SSE handlers before aiohttp waits for open connections to drain.
+        habitat.running = False
+
     async def stop(app: web.Application) -> None:
         habitat.running = False
         await app["runner"]
@@ -277,6 +281,7 @@ async def create_app(habitat: Habitat, ticks_per_second: int) -> web.Application
         habitat.history.close()
 
     app.on_startup.append(start)
+    app.on_shutdown.append(begin_shutdown)
     app.on_cleanup.append(stop)
     return app
 
