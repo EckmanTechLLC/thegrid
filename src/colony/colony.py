@@ -37,6 +37,12 @@ class Colony:
         genomes = founder_genomes or [build_ancestor() for _ in range(founders)]
         if len(genomes) < founders:
             raise ValueError("founder_genomes must contain at least one genome per founder")
+        # Seed distinct, viable niches. Random placement on a patchy field can
+        # erase most founder diversity before evolution even begins.
+        positions = [(x, y) for y in range(self.world.config.height)
+                     for x in range(self.world.config.width)]
+        self.rng.shuffle(positions)
+        positions.sort(key=lambda p: self.world.tile_energy(*p), reverse=True)
         for lineage in range(founders):
             genome = list(genomes[lineage])
             if not genome:
@@ -45,8 +51,8 @@ class Colony:
                 break
             founder = Organism(
                 id=self._id(), genome=genome,
-                x=self.rng.randrange(self.world.config.width),
-                y=self.rng.randrange(self.world.config.height), lineage=lineage,
+                x=positions[lineage][0], y=positions[lineage][1], lineage=lineage,
+                energy=48.0,
             )
             self.organisms.append(founder)
             self.lifecycle_events.append({"kind": "birth", "tick": self.world.tick,

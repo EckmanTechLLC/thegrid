@@ -61,6 +61,18 @@ def test_diverse_founders_are_unique_viable_and_fit_large_map_encoding():
     assert encoded[:3] == "27v"  # base-32 encoding of tile 2303
 
 
+def test_diverse_epoch_seeds_every_lineage_on_a_rich_distinct_patch():
+    world = World(WorldConfig(width=48, height=48, seed=42))
+    colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
+                    seed=42, founders=12,
+                    founder_genomes=build_founder_palette())
+    positions = {(o.x, o.y) for o in colony.organisms}
+    assert len(positions) == 12
+    assert all(world.tile_energy(o.x, o.y) == world.config.tile_capacity
+               for o in colony.organisms)
+    assert all(o.energy == 48.0 for o in colony.organisms)
+
+
 def test_live_habitat_restores_checkpoint(tmp_path):
     state = tmp_path / "colony.pkl"
     habitat = Habitat(state, seed=9, founders=2, physical=False)
