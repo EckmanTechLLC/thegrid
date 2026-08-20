@@ -19,7 +19,7 @@ from aiohttp import web
 
 from .colony import Colony
 from .history import LineageHistory, genome_id
-from .isa import ISA, build_ancestor
+from .isa import ISA, build_ancestor, build_founder_palette
 from .odin_operator import OdinMutator
 from .record import ALPHABET, encode_energy, encode_genome, encode_positions
 from .tasks import TemporalTaskEnvironment
@@ -28,11 +28,14 @@ from .world import WorldConfig
 
 
 class Habitat:
-    def __init__(self, state_path: Path, seed: int = 42, founders: int = 6,
-                 physical: bool = True, mutator_kind: str = "odin"):
+    def __init__(self, state_path: Path, seed: int = 42, founders: int = 12,
+                 physical: bool = True, mutator_kind: str = "odin",
+                 width: int = 48, height: int = 48):
         self.state_path = state_path
         self.seed = seed
         self.founders = founders
+        self.width = width
+        self.height = height
         self.physical = physical
         self.mutator_kind = mutator_kind
         self.epoch = 1
@@ -53,7 +56,8 @@ class Habitat:
 
     def _new_colony(self) -> Colony:
         if self.physical:
-            world = SubstrateWorld(WorldConfig(seed=self.seed))
+            world = SubstrateWorld(WorldConfig(width=self.width, height=self.height,
+                                               seed=self.seed))
             if self.mutator_kind == "odin":
                 mutator = OdinMutator(self.state_path.parent / "operator")
             else:
@@ -62,10 +66,12 @@ class Habitat:
         else:  # deterministic unit-test boundary; never used by the service
             from .mutation import RandomMutator
             from .world import World
-            world = World(WorldConfig(seed=self.seed))
+            world = World(WorldConfig(width=self.width, height=self.height,
+                                      seed=self.seed))
             mutator = RandomMutator()
         return Colony(world, mutator, TemporalTaskEnvironment(),
-                      seed=self.seed, founders=self.founders)
+                      seed=self.seed, founders=self.founders,
+                      founder_genomes=build_founder_palette())
 
     def _load_or_create(self) -> Colony:
         try:

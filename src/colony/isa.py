@@ -87,6 +87,29 @@ def build_ancestor() -> list[int]:
     ]
 
 
+def build_founder_palette() -> list[list[int]]:
+    """Twelve viable replicators with different immediately usable traits."""
+    core = build_ancestor()
+    return [
+        core,
+        [Op.HARVEST, *core],
+        [*core, Op.SCAN, Op.MOVE, Op.HARVEST],
+        [*core, Op.BUILD],
+        [*core, Op.SIGNAL],
+        [*core, Op.LISTEN, Op.MOVE, Op.HARVEST],
+        [*core, Op.STORE, Op.LOAD],
+        [*core, Op.INC, Op.PUSH, Op.ADD],
+        [*core, Op.INPUT, Op.INPUT, Op.OUTPUT],
+        [*core, Op.PEEK],
+        # COPYN gets a chance to import a neighbour word; COPY remains a
+        # fallback when isolated, so this founder is independently viable.
+        [Op.HARVEST, Op.HARVEST, Op.ALLOC, Op.COPYN, Op.COPY,
+         Op.IFNOTDONE, Op.JMPB, Op.FORK, Op.SCAN, Op.MOVE],
+        [Op.HARVEST, Op.NOP, Op.HARVEST, Op.ALLOC, Op.COPY,
+         Op.IFNOTDONE, Op.JMPB, Op.FORK, Op.NOP, Op.SCAN, Op.MOVE],
+    ]
+
+
 def disassemble(genome: list[int], annotate: bool = True) -> str:
     lines = []
     for index, word in enumerate(genome):

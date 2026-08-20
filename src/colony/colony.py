@@ -14,7 +14,8 @@ from .world import World
 
 class Colony:
     def __init__(self, world: World | None = None, mutator=None, tasks=None,
-                 seed: int = 42, founders: int = 6, max_age: int = 2400):
+                 seed: int = 42, founders: int = 6, max_age: int = 2400,
+                 founder_genomes: list[list[int]] | None = None):
         self.world = world or World()
         self.mutator = mutator or RandomMutator()
         self.tasks = tasks or TaskEnvironment()
@@ -33,12 +34,17 @@ class Colony:
         self.forecasts_solved = 0
         self.mutation_mechanisms: Counter = Counter()
         self.lifecycle_events = deque()
-        ancestor = build_ancestor()
+        genomes = founder_genomes or [build_ancestor() for _ in range(founders)]
+        if len(genomes) < founders:
+            raise ValueError("founder_genomes must contain at least one genome per founder")
         for lineage in range(founders):
-            if not self.world.request_memory(len(ancestor)):
+            genome = list(genomes[lineage])
+            if not genome:
+                raise ValueError("founder genomes cannot be empty")
+            if not self.world.request_memory(len(genome)):
                 break
             founder = Organism(
-                id=self._id(), genome=list(ancestor),
+                id=self._id(), genome=genome,
                 x=self.rng.randrange(self.world.config.width),
                 y=self.rng.randrange(self.world.config.height), lineage=lineage,
             )

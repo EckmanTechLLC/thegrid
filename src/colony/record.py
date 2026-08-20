@@ -26,16 +26,17 @@ from .mutation import (
 from .tasks import TaskEnvironment
 from .world import World, WorldConfig
 
-# 32 symbols: encodes a tile index 0..1023 in exactly two characters.
+# 32 symbols: three digits encode maps up to 32,768 tiles.
 ALPHABET = "0123456789abcdefghijklmnopqrstuv"
 
 
 def encode_positions(colony: Colony, width: int) -> str:
-    """Three characters per organism: two for tile index, one for lineage."""
+    """Four characters per organism: three for tile index, one for lineage."""
     out = []
     for organism in colony.organisms:
-        index = (organism.y * width + organism.x) & 0x3FF
-        out.append(ALPHABET[index >> 5] + ALPHABET[index & 31]
+        index = organism.y * width + organism.x
+        out.append(ALPHABET[(index >> 10) & 31] + ALPHABET[(index >> 5) & 31]
+                   + ALPHABET[index & 31]
                    + ALPHABET[organism.lineage % 32])
     return "".join(out)
 

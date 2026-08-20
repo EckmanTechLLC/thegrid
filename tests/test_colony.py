@@ -1,5 +1,6 @@
 from src.colony.colony import Colony
-from src.colony.isa import ISA, Op, build_ancestor
+from src.colony.isa import ISA, Op, build_ancestor, build_founder_palette
+from src.colony.record import encode_positions
 from src.colony.mutation import ExperimentalMutator, RandomMutator, parse_genome
 from src.colony.world import World, WorldConfig
 from src.colony.live import Habitat
@@ -40,6 +41,26 @@ def test_ancestor_is_valid():
     assert all(isinstance(word, int) for word in build_ancestor())
 
 
+def test_diverse_founders_are_unique_viable_and_fit_large_map_encoding():
+    palette = build_founder_palette()
+    assert len(palette) == len({tuple(genome) for genome in palette}) == 12
+    for lineage, genome in enumerate(palette):
+        world = World(WorldConfig(width=48, height=48, tile_regen=0.5,
+                                  memory_cap=500, seed=100 + lineage))
+        colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
+                        seed=100 + lineage, founders=1,
+                        founder_genomes=[genome])
+        for _ in range(300):
+            colony.step()
+        assert colony.births > 0, f"founder {lineage} did not reproduce"
+    colony = Colony(World(WorldConfig(width=48, height=48, seed=5)),
+                    founders=12, founder_genomes=palette)
+    colony.organisms[0].x, colony.organisms[0].y = 47, 47
+    encoded = encode_positions(colony, 48)
+    assert len(encoded) == 4 * len(colony.organisms)
+    assert encoded[:3] == "27v"  # base-32 encoding of tile 2303
+
+
 def test_live_habitat_restores_checkpoint(tmp_path):
     state = tmp_path / "colony.pkl"
     habitat = Habitat(state, seed=9, founders=2, physical=False)
@@ -52,8 +73,8 @@ def test_live_habitat_restores_checkpoint(tmp_path):
     restored = Habitat(state, physical=False)
     assert restored.colony.world.tick == 25
     assert restored.snapshot()["population"] == len(restored.colony.organisms)
-    assert len(restored.snapshot()["signalField"]) == 32 * 32
-    assert len(restored.snapshot()["structureField"]) == 32 * 32
+    assert len(restored.snapshot()["signalField"]) == 48 * 48
+    assert len(restored.snapshot()["structureField"]) == 48 * 48
 
 
 def test_extinction_releases_old_colony_and_seeds_one_new_epoch(tmp_path):
