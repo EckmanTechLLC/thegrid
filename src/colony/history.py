@@ -65,6 +65,8 @@ class LineageHistory:
                 mutation_type TEXT NOT NULL,
                 origin_births INTEGER NOT NULL DEFAULT 0,
                 occurrences INTEGER NOT NULL DEFAULT 0,
+                births_at_first_origin INTEGER NOT NULL DEFAULT 0,
+                first_generation INTEGER NOT NULL DEFAULT 0,
                 first_tick INTEGER NOT NULL,
                 last_tick INTEGER NOT NULL,
                 PRIMARY KEY (epoch, child_genome_id, mutation_type)
@@ -112,6 +114,27 @@ class LineageHistory:
         epoch_columns = {row[1] for row in self._db.execute("PRAGMA table_info(epochs)")}
         if "end_reason" not in epoch_columns:
             self._db.execute("ALTER TABLE epochs ADD COLUMN end_reason TEXT")
+        origin_columns = {row[1] for row in self._db.execute("PRAGMA table_info(mutation_origins)")}
+        if "births_at_first_origin" not in origin_columns:
+            self._db.execute(
+                "ALTER TABLE mutation_origins ADD COLUMN births_at_first_origin INTEGER NOT NULL DEFAULT 0")
+        if "first_generation" not in origin_columns:
+            self._db.execute(
+                "ALTER TABLE mutation_origins ADD COLUMN first_generation INTEGER NOT NULL DEFAULT 0")
+        # Rows created before these baselines existed start measuring now rather
+        # than receiving credit for reproduction predating the mutation origin.
+        self._db.execute("""
+            UPDATE mutation_origins
+            SET births_at_first_origin=(
+                    SELECT births FROM genome_stats s
+                    WHERE s.epoch=mutation_origins.epoch
+                      AND s.genome_id=mutation_origins.child_genome_id),
+                first_generation=(
+                    SELECT max_generation FROM genome_stats s
+                    WHERE s.epoch=mutation_origins.epoch
+                      AND s.genome_id=mutation_origins.child_genome_id)
+            WHERE births_at_first_origin=0
+        """)
         self._db.commit()
         self._last_commit = time.monotonic()
         self._last_ecology_tick: dict[int, int] = {}
@@ -158,16 +181,22 @@ class LineageHistory:
                     for mutation_type in event.get("mutations", []):
                         mutation_counts[mutation_type] = mutation_counts.get(mutation_type, 0) + 1
                     for mutation_type, occurrences in mutation_counts.items():
+                        births_now = self._db.execute(
+                            "SELECT births FROM genome_stats WHERE epoch=? AND genome_id=?",
+                            (epoch, child_id),
+                        ).fetchone()[0]
                         self._db.execute("""
                             INSERT INTO mutation_origins(
                                 epoch,child_genome_id,mutation_type,origin_births,
-                                occurrences,first_tick,last_tick)
-                            VALUES(?,?,?,?,?,?,?)
+                                occurrences,births_at_first_origin,first_generation,
+                                first_tick,last_tick)
+                            VALUES(?,?,?,?,?,?,?,?,?)
                             ON CONFLICT(epoch,child_genome_id,mutation_type) DO UPDATE SET
                                 origin_births=origin_births+1,
                                 occurrences=occurrences+excluded.occurrences,
                                 last_tick=excluded.last_tick
-                        """, (epoch, child_id, mutation_type, 1, occurrences, tick, tick))
+                        """, (epoch, child_id, mutation_type, 1, occurrences,
+                              births_now, organism.generation, tick, tick))
                 else:
                     column = "starvation_deaths" if event["cause"] == "starvation" else "senescence_deaths"
                     self._db.execute(
@@ -298,8 +327,8 @@ class LineageHistory:
                        sum(o.origin_births) AS origin_births,
                        sum(o.occurrences) AS occurrences,
                        count(*) AS genomes,
-                       max(s.max_generation-s.first_generation) AS max_generation_span,
-                       max(0,sum(s.births)-sum(o.origin_births)) AS later_reproductions
+                       max(s.max_generation-o.first_generation) AS max_generation_span,
+                       sum(max(0,s.births-o.births_at_first_origin)) AS later_reproductions
                 FROM mutation_origins o
                 JOIN genome_stats s ON s.epoch=o.epoch AND s.genome_id=o.child_genome_id
                 WHERE o.epoch=?
