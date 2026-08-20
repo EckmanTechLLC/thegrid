@@ -18,6 +18,8 @@ The interfaces are the same either way.
 from dataclasses import dataclass, field
 import random
 
+from .isa import Op
+
 
 @dataclass
 class WorldConfig:
@@ -87,16 +89,73 @@ class World:
         """Draw energy from a tile. Returns what was actually available."""
         c = self.config
         y, x = y % c.height, x % c.width
-        taken = min(c.harvest_rate, self.energy[y][x])
+        # The forage biome rewards a short harvesting specialist; elsewhere
+        # harvesting is weaker enough that mobility, building, or information
+        # processing can repay their extra instructions.
+        rate = c.harvest_rate * (1.35 if self.biome(x, y) == 0 else 0.78)
+        taken = min(rate, self.energy[y][x])
         self.energy[y][x] -= taken
         return taken
 
     def wrap(self, x: int, y: int) -> tuple[int, int]:
         return x % self.config.width, y % self.config.height
 
+    def biome(self, x: int, y: int) -> int:
+        """Persistent NW forage, NE nomad, SW engineer, SE information niche."""
+        c = self.config
+        x, y = self.wrap(x, y)
+        return (x >= c.width // 2) + 2 * (y >= c.height // 2)
+
+    def move(self, x: int, y: int, dx: int, dy: int) -> tuple[int, int]:
+        """Move within a biome, crossing boundaries only through narrow gates."""
+        destination = self.wrap(x + dx, y + dy)
+        if self.biome(x, y) == self.biome(*destination):
+            return destination
+        # Two three-tile migration corridors cross each boundary. This also
+        # gates the toroidal outer seam, preventing instant global mixing.
+        perpendicular = y if dx else x
+        extent = self.config.height if dx else self.config.width
+        gates = (extent // 4, 3 * extent // 4)
+        return destination if any(abs(perpendicular - gate) <= 1 for gate in gates) else (x, y)
+
+    def instruction_cost_multiplier(self, op: Op, x: int, y: int) -> float:
+        """Local energetic tradeoffs; replication remains the neutral yardstick."""
+        biome = self.biome(x, y)
+        local = 1.0
+        if biome == 0:  # forage: cheap harvesting, expensive infrastructure
+            if op == Op.HARVEST:
+                local = 0.65
+            elif op in (Op.BUILD, Op.SIGNAL, Op.LISTEN):
+                local = 1.4
+        elif biome == 1:  # nomad: cheap sensing/motion, poor stationary yield
+            if op in (Op.SCAN, Op.MOVE):
+                local = 0.55
+            elif op in (Op.HARVEST, Op.BUILD):
+                local = 1.3
+        elif biome == 2:  # engineer: construction pays, motion/foraging do not
+            if op == Op.BUILD:
+                local = 0.45
+            elif op in (Op.HARVEST, Op.MOVE):
+                local = 1.3
+        else:  # information: communication, memory, and computation are cheap
+            if op in (Op.SIGNAL, Op.LISTEN, Op.INPUT, Op.OUTPUT, Op.ADD, Op.SUB,
+                      Op.XOR, Op.LOAD, Op.STORE, Op.NAND, Op.PEEK, Op.COPYN):
+                local = 0.55
+            elif op in (Op.HARVEST, Op.BUILD):
+                local = 1.35
+        return self.cost_multiplier * local
+
+    def build_cost(self, x: int, y: int) -> float:
+        return 1.5 if self.biome(x, y) == 2 else 4.0
+
+    def task_reward_multiplier(self, x: int, y: int) -> float:
+        return 1.75 if self.biome(x, y) == 3 else 0.75
+
     def signal(self, x: int, y: int, value: int) -> None:
         radius = getattr(self.config, "signal_radius", 3)
         duration = getattr(self.config, "signal_duration", 24)
+        if self.biome(x, y) == 3:
+            duration = int(duration * 1.75)
         attenuation = getattr(self.config, "signal_attenuation", 5)
         for dy in range(-radius, radius + 1):
             for dx in range(-radius, radius + 1):
@@ -200,10 +259,11 @@ class World:
         for y, row in enumerate(self.energy):
             for x in range(c.width):
                 if row[x] < c.tile_capacity:
-                    quadrant = (x >= c.width // 2) + 2 * (y >= c.height // 2)
-                    climate = 1.8 if quadrant == phase else 0.55
-                    construction = self.structures[y][x] * 0.003
-                    row[x] = min(c.tile_capacity, row[x] + c.tile_regen * climate + construction)
+                    biome = self.biome(x, y)
+                    climate = 1.8 if biome == phase else 0.55
+                    base = (1.25, 0.65, 0.40, 0.75)[biome]
+                    construction = self.structures[y][x] * 0.003 * (4.0 if biome == 2 else 0.6)
+                    row[x] = min(c.tile_capacity, row[x] + c.tile_regen * climate * base + construction)
                 if self.signal_strength[y][x] > 0:
                     self.signal_strength[y][x] -= 1
                     if self.signal_strength[y][x] == 0:

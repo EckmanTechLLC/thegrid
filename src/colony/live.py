@@ -256,6 +256,12 @@ class Habitat:
                                  if population else 0.0)
         active_signals = sum(value > 0 for row in world.signal_strength for value in row)
         built_tiles = sum(value > 0 for row in world.structures for value in row)
+        biome_populations = Counter(world.biome(o.x, o.y) for o in colony.organisms)
+        biome_genomes = {
+            biome: len({tuple(o.genome) for o in colony.organisms
+                        if world.biome(o.x, o.y) == biome})
+            for biome in range(4)
+        }
         self.history.record_ecology(
             self.epoch, world.tick, population=population, diversity=diversity,
             dominance=carriers / population if population else 0.0,
@@ -283,6 +289,11 @@ class Habitat:
             "cpuUsageUsec": getattr(world, "cpu_usage_usec", 0),
             "substrate": "linux-cgroup-v2 + AMD k10temp" if self.physical else "test",
             "energy": encode_energy(world),
+            "biomeField": "".join(str(world.biome(x, y))
+                                    for y in range(world.config.height)
+                                    for x in range(world.config.width)),
+            "biomePopulations": [biome_populations.get(i, 0) for i in range(4)],
+            "biomeGenomes": [biome_genomes[i] for i in range(4)],
             "organisms": encode_positions(colony, world.config.width),
             "genomeGlyphs": "".join(genome_id(o.genome)[0] for o in colony.organisms),
             "strains": [strains.get(i, 0) for i in range(self.founders)],

@@ -159,10 +159,11 @@ class SubstrateWorld(World):
         for y, row in enumerate(self.energy):
             for x in range(c.width):
                 if row[x] < c.tile_capacity:
-                    quadrant = (x >= c.width // 2) + 2 * (y >= c.height // 2)
-                    climate = 1.8 if quadrant == phase else 0.55
-                    construction = self.structures[y][x] * 0.003
-                    row[x] = min(c.tile_capacity, row[x] + c.tile_regen * climate + construction)
+                    biome = self.biome(x, y)
+                    climate = 1.8 if biome == phase else 0.55
+                    base = (1.25, 0.65, 0.40, 0.75)[biome]
+                    construction = self.structures[y][x] * 0.003 * (4.0 if biome == 2 else 0.6)
+                    row[x] = min(c.tile_capacity, row[x] + c.tile_regen * climate * base + construction)
                 if self.signal_strength[y][x] > 0:
                     self.signal_strength[y][x] -= 1
                     if self.signal_strength[y][x] == 0:

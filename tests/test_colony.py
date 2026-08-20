@@ -98,6 +98,8 @@ def test_live_habitat_restores_checkpoint(tmp_path):
     assert restored.snapshot()["population"] == len(restored.colony.organisms)
     assert len(restored.snapshot()["signalField"]) == 48 * 48
     assert len(restored.snapshot()["structureField"]) == 48 * 48
+    assert len(restored.snapshot()["biomeField"]) == 48 * 48
+    assert len(restored.snapshot()["biomePopulations"]) == 4
 
 
 def test_extinction_releases_old_colony_and_seeds_one_new_epoch(tmp_path):
@@ -497,3 +499,23 @@ def test_storm_warning_replaces_inputs_only_during_warning_window():
     assert tasks.inputs(900, 7) == (1, 3)
     assert tasks.inputs(999, 7) == (1, 3)
     assert tasks.inputs(1000, 7) != (2, 0)
+
+
+def test_biomes_create_real_instruction_and_resource_tradeoffs():
+    world = World(WorldConfig(width=8, height=8, seed=30))
+    # NW forage, NE nomad, SW engineer, SE information.
+    assert world.instruction_cost_multiplier(Op.HARVEST, 1, 1) < 1
+    assert world.instruction_cost_multiplier(Op.BUILD, 1, 1) > 1
+    assert world.instruction_cost_multiplier(Op.MOVE, 6, 1) < 1
+    assert world.build_cost(1, 6) < world.build_cost(1, 1)
+    assert world.instruction_cost_multiplier(Op.SIGNAL, 6, 6) < 1
+    assert world.task_reward_multiplier(6, 6) > 1
+    world.energy[1][1] = world.energy[1][6] = 90
+    assert world.harvest(1, 1) > world.harvest(6, 1)
+
+
+def test_biome_boundaries_have_narrow_migration_corridors():
+    world = World(WorldConfig(width=8, height=8, seed=31))
+    assert world.move(3, 0, 1, 0) == (3, 0)  # blocked boundary
+    assert world.move(3, 2, 1, 0) == (4, 2)  # quarter-map gate
+    assert world.move(1, 1, 1, 0) == (2, 1)  # free within a biome

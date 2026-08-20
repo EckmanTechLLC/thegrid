@@ -89,7 +89,8 @@ class Organism:
             name = ISA[op].name
             self.experimental_ops[name] = self.experimental_ops.get(name, 0) + 1
             colony.experimental_ops[name] += 1
-        self.energy -= ISA[op].cost * colony.world.cost_multiplier
+        self.energy -= ISA[op].cost * colony.world.instruction_cost_multiplier(
+            op, self.x, self.y)
         colony.world.charge_instruction()
         self.age += 1
         next_ip = (self.ip + 1) % len(self.genome)
@@ -112,7 +113,7 @@ class Organism:
             self.listen_pending = False
         elif op == Op.MOVE:
             dx, dy = [(0, -1), (1, 0), (0, 1), (-1, 0)][self.a % 4]
-            self.x, self.y = colony.world.wrap(self.x + dx, self.y + dy)
+            self.x, self.y = colony.world.move(self.x, self.y, dx, dy)
             self.moves = getattr(self, "moves", 0) + 1
             if getattr(self, "scan_pending", False):
                 self.guided_moves = getattr(self, "guided_moves", 0) + 1
@@ -197,7 +198,7 @@ class Organism:
                 name, reward = colony.tasks.evaluate(self.a, self.last_inputs)
                 self.task_inputs_seen = 0
             if name:
-                self.energy += reward
+                self.energy += reward * colony.world.task_reward_multiplier(self.x, self.y)
                 self.tasks_solved[name] = self.tasks_solved.get(name, 0) + 1
                 colony.note_task(name)
         elif op == Op.IFZERO and self.a != 0:
@@ -215,8 +216,9 @@ class Organism:
             if strength > 0:
                 self.signals_heard = getattr(self, "signals_heard", 0) + 1
         elif op == Op.BUILD:
-            if self.energy >= 4.0:
-                self.energy -= 4.0
+            build_cost = colony.world.build_cost(self.x, self.y)
+            if self.energy >= build_cost:
+                self.energy -= build_cost
                 colony.world.build(self.x, self.y)
                 self.structures_built = getattr(self, "structures_built", 0) + 1
         elif op == Op.PEEK:
