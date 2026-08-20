@@ -69,7 +69,8 @@ class LineageHistory:
                 deaths INTEGER,
                 max_generation INTEGER,
                 extinct INTEGER NOT NULL DEFAULT 0,
-                partial INTEGER NOT NULL DEFAULT 0
+                partial INTEGER NOT NULL DEFAULT 0,
+                end_reason TEXT
             );
             CREATE TABLE IF NOT EXISTS ecology_buckets (
                 epoch INTEGER NOT NULL,
@@ -98,6 +99,9 @@ class LineageHistory:
             self._db.execute("ALTER TABLE genome_stats ADD COLUMN first_generation INTEGER")
             # Existing rows become conservative lower bounds measured from deployment.
             self._db.execute("UPDATE genome_stats SET first_generation=max_generation")
+        epoch_columns = {row[1] for row in self._db.execute("PRAGMA table_info(epochs)")}
+        if "end_reason" not in epoch_columns:
+            self._db.execute("ALTER TABLE epochs ADD COLUMN end_reason TEXT")
         self._db.commit()
         self._last_commit = time.monotonic()
         self._last_ecology_tick: dict[int, int] = {}
@@ -171,7 +175,8 @@ class LineageHistory:
         """, (epoch, identity, generation, generation, tick, tick))
         return identity
 
-    def finish_epoch(self, epoch: int, colony, extinct: bool = True) -> None:
+    def finish_epoch(self, epoch: int, colony, extinct: bool = True,
+                     reason: str | None = None) -> None:
         with self._lock:
             maximum = self._db.execute(
                 "SELECT coalesce(max(max_generation),0) FROM genome_stats WHERE epoch=?",
@@ -179,9 +184,9 @@ class LineageHistory:
             ).fetchone()[0]
             self._db.execute("""
                 UPDATE epochs SET ended_at=?,ended_tick=?,births=?,deaths=?,
-                    max_generation=?,extinct=? WHERE epoch=?
+                    max_generation=?,extinct=?,end_reason=? WHERE epoch=?
             """, (time.time(), colony.world.tick, colony.births, colony.deaths,
-                  maximum, int(extinct), epoch))
+                  maximum, int(extinct), reason or ("extinction" if extinct else None), epoch))
             self._db.commit()
 
     def record_ecology(self, epoch: int, tick: int, *, population: int,

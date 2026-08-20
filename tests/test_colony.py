@@ -340,3 +340,20 @@ def test_experimental_mutator_can_insert_short_instruction_bursts():
     result = mutator.mutate_at_birth(list(genome), AlwaysBurst(17))
     assert len(result) == len(genome) + 3
     assert all(0 <= word < len(ISA) for word in result)
+
+
+def test_operator_can_retire_living_epoch_without_calling_it_extinct(tmp_path):
+    habitat = Habitat(tmp_path / "retire.pkl", seed=21, founders=2, physical=False)
+    old_tick = habitat.colony.world.tick
+    habitat.retire_current_epoch("playground reset")
+    assert habitat.epoch == 2
+    assert habitat.seed == 22
+    assert habitat.colony.world.tick == 0
+    assert len(habitat.colony.organisms) == 2
+    epochs = habitat.history.summary(2)["epochs"]
+    retired = next(row for row in epochs if row["epoch"] == 1)
+    assert retired["ended_tick"] == old_tick
+    assert retired["extinct"] == 0
+    assert retired["end_reason"] == "playground reset"
+    assert habitat.events[-1]["text"] == "epoch intentionally retired; epoch 2 seeded"
+    habitat.history.close()

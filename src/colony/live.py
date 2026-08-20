@@ -142,6 +142,33 @@ class Habitat:
             shutil.copy2(self.state_path, self.state_path.with_suffix(".previous.pkl"))
         temporary.replace(self.state_path)
 
+    def retire_current_epoch(self, reason: str = "operator-directed retirement") -> None:
+        """Archive the living epoch in history and seed a clean successor."""
+        old_colony = self.colony
+        old_tick = old_colony.world.tick
+        self.history.finish_epoch(self.epoch, old_colony, extinct=False, reason=reason)
+        self.colony = None  # type: ignore[assignment]
+        gc.collect()
+        try:
+            ctypes.CDLL(None).malloc_trim(0)
+        except (AttributeError, OSError):
+            pass
+        self.seed += 1
+        self.epoch += 1
+        self.started_at = time.time()
+        self.colony = self._new_colony()
+        if not self.colony.organisms:
+            raise RuntimeError("fresh epoch could not allocate founders")
+        self.history.start_epoch(self.epoch, self.seed, self.started_at,
+                                 self.colony.organisms)
+        self.events.append({
+            "tick": old_tick,
+            "text": f"epoch intentionally retired; epoch {self.epoch} seeded",
+        })
+        self._last_tasks.clear()
+        self.latest = self.snapshot()
+        self.save()
+
     def step(self) -> None:
         if not self.colony.organisms:
             self.history.finish_epoch(self.epoch, self.colony)
@@ -403,10 +430,15 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--ticks-per-second", type=int, default=100)
     parser.add_argument("--mutator", choices=("odin", "random"), default="odin")
+    parser.add_argument("--retire-current-epoch", action="store_true")
     parser.add_argument("--state", type=Path,
                         default=Path.home() / ".local/state/thegrid/colony.pkl")
     args = parser.parse_args()
     habitat = Habitat(args.state, mutator_kind=args.mutator)
+    if args.retire_current_epoch:
+        habitat.retire_current_epoch()
+        habitat.history.close()
+        return
     web.run_app(create_app(habitat, args.ticks_per_second), host=args.host,
                 port=args.port, print=None)
 
