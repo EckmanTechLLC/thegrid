@@ -62,6 +62,32 @@ class RandomMutator:
         return genome
 
 
+class ExperimentalMutator(RandomMutator):
+    """Colony Two's deliberately unruly blind variation.
+
+    Point changes remain modest, while births receive more structural edits and
+    occasional short instruction bursts.  Bursts let selection encounter small
+    motifs without waiting for several individually neutral insertions to line
+    up in successive generations.
+    """
+
+    def __init__(self, point_rate: float = 0.012, indel_rate: float = 0.06,
+                 burst_rate: float = 0.025, burst_min: int = 2,
+                 burst_max: int = 4):
+        super().__init__(point_rate=point_rate, indel_rate=indel_rate)
+        self.burst_rate = burst_rate
+        self.burst_min = burst_min
+        self.burst_max = burst_max
+
+    def mutate_at_birth(self, genome: list[int], rng: random.Random) -> list[int]:
+        genome = super().mutate_at_birth(genome, rng)
+        if genome and rng.random() < self.burst_rate:
+            length = rng.randint(self.burst_min, self.burst_max)
+            position = rng.randrange(len(genome) + 1)
+            genome[position:position] = [rng.randrange(NUM_OPS) for _ in range(length)]
+        return genome
+
+
 class LLMMutator:
     """LLM-guided variation, priced in energy and used sparingly.
 

@@ -12,8 +12,11 @@ This `colony2-experimental` branch runs a separate computational habitat with
 six appended instructions: modular `add`/`sub`, bitwise `xor`, eight bytes of
 private scratch memory accessed through `load`/`store`, and a register-controlled
 relative jump. Existing instruction numbers are unchanged. The experimental
-service uses blind mutation initially so these capabilities must emerge through
-the substrate rather than authored proposals.
+service uses blind mutation so these capabilities must emerge through the
+substrate rather than authored proposals. Its experimental mutator uses a 1.2%
+copy-error rate, a 6% single-indel rate, and a 2.5% chance per birth of inserting
+a contiguous two-to-four-instruction burst. Colony One retains the conservative
+mutation regime.
 
 Colony Two also offers a delayed forecast niche. Two `input` values define a
 future modular sum, but `output` pays its 18-energy reward only after 24 ticks

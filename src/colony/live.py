@@ -56,8 +56,8 @@ class Habitat:
             if self.mutator_kind == "odin":
                 mutator = OdinMutator(self.state_path.parent / "operator")
             else:
-                from .mutation import RandomMutator
-                mutator = RandomMutator()
+                from .mutation import ExperimentalMutator
+                mutator = ExperimentalMutator()
         else:  # deterministic unit-test boundary; never used by the service
             from .mutation import RandomMutator
             from .world import World
@@ -79,9 +79,9 @@ class Habitat:
                 colony.world = SubstrateWorld.from_world(colony.world)
             if self.physical and self.mutator_kind == "odin" and not isinstance(colony.mutator, OdinMutator):
                 colony.mutator = OdinMutator(self.state_path.parent / "operator")
-            elif self.physical and self.mutator_kind == "random" and isinstance(colony.mutator, OdinMutator):
-                from .mutation import RandomMutator
-                colony.mutator = RandomMutator()
+            elif self.physical and self.mutator_kind == "random":
+                from .mutation import ExperimentalMutator
+                colony.mutator = ExperimentalMutator()
             config = colony.world.config
             for name in ("signals", "signal_strength", "structures"):
                 if not hasattr(colony.world, name):

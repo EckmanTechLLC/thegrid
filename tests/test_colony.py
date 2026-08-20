@@ -1,6 +1,6 @@
 from src.colony.colony import Colony
-from src.colony.isa import Op, build_ancestor
-from src.colony.mutation import RandomMutator, parse_genome
+from src.colony.isa import ISA, Op, build_ancestor
+from src.colony.mutation import ExperimentalMutator, RandomMutator, parse_genome
 from src.colony.world import World, WorldConfig
 from src.colony.live import Habitat
 from src.colony.odin_operator import OdinMutator
@@ -327,3 +327,16 @@ def test_temporal_forecast_is_reachable_by_a_looping_replicator():
         colony.step()
     assert colony.forecasts_solved > 0
     assert colony.births > 0
+
+
+def test_experimental_mutator_can_insert_short_instruction_bursts():
+    class AlwaysBurst(random.Random):
+        def random(self):
+            return 0.0
+
+    genome = [Op.HARVEST, Op.ALLOC, Op.COPY, Op.FORK]
+    mutator = ExperimentalMutator(point_rate=0, indel_rate=0,
+                                  burst_rate=1, burst_min=3, burst_max=3)
+    result = mutator.mutate_at_birth(list(genome), AlwaysBurst(17))
+    assert len(result) == len(genome) + 3
+    assert all(0 <= word < len(ISA) for word in result)
