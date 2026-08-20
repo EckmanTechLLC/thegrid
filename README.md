@@ -18,6 +18,12 @@ copy-error rate, a 6% single-indel rate, and a 2.5% chance per birth of insertin
 a contiguous two-to-four-instruction burst. Colony One retains the conservative
 mutation regime.
 
+Gene-scale variation can also duplicate a two-to-six-instruction segment
+(1.5% per birth), delete a two-to-four-instruction block (1%), or invert a
+two-to-six-instruction block (1%). Genomes are capped at 64 instructions. The
+live state and SQLite fossil record track mutation mechanisms separately and
+report whether their originating genomes later reproduced.
+
 Colony Two also offers a delayed forecast niche. Two `input` values define a
 future modular sum, but `output` pays its 18-energy reward only after 24 ticks
 and only when the answer was stored before the delay and loaded from scratch

@@ -31,6 +31,7 @@ class Colony:
         self.experimental_ops: Counter = Counter()
         self.forecast_attempts = 0
         self.forecasts_solved = 0
+        self.mutation_mechanisms: Counter = Counter()
         self.lifecycle_events = deque()
         ancestor = build_ancestor()
         for lineage in range(founders):
@@ -78,16 +79,18 @@ class Colony:
             return
         reserved = len(parent.genome)
         proposal = list(parent.child)
+        mutation_events = list(getattr(parent, "child_mutations", []))
         if hasattr(self.mutator, "offer"):
             self.mutator.offer(parent)
         proposal = self.mutator.mutate_at_birth(proposal, self.rng)
+        mutation_events.extend(getattr(self.mutator, "last_events", []))
         delta = len(proposal) - reserved
         if delta > 0 and not self.world.request_memory(delta):
             parent.free_child(self.world)
             return
         if delta < 0:
             self.world.release_memory(-delta)
-        parent.child, parent.copy_index = None, 0
+        parent.child, parent.copy_index, parent.child_mutations = None, 0, []
         if not proposal:
             self.world.release_memory(len(proposal))
             return
@@ -98,9 +101,11 @@ class Colony:
         parent.energy -= 8.0
         parent.births += 1
         self.births += 1
+        self.mutation_mechanisms.update(mutation_events)
         self.organisms.append(child)
         self.lifecycle_events.append({"kind": "birth", "tick": self.world.tick,
-                                      "organism": child, "parent": parent})
+                                      "organism": child, "parent": parent,
+                                      "mutations": mutation_events})
 
     def note_task(self, name: str) -> None:
         self.task_firsts.setdefault(name, self.world.tick)

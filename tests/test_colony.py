@@ -336,10 +336,56 @@ def test_experimental_mutator_can_insert_short_instruction_bursts():
 
     genome = [Op.HARVEST, Op.ALLOC, Op.COPY, Op.FORK]
     mutator = ExperimentalMutator(point_rate=0, indel_rate=0,
-                                  burst_rate=1, burst_min=3, burst_max=3)
+                                  burst_rate=1, burst_min=3, burst_max=3,
+                                  duplication_rate=0, block_deletion_rate=0,
+                                  inversion_rate=0)
     result = mutator.mutate_at_birth(list(genome), AlwaysBurst(17))
     assert len(result) == len(genome) + 3
     assert all(0 <= word < len(ISA) for word in result)
+
+
+def test_gene_scale_mutations_are_bounded_and_labeled():
+    genome = [Op.HARVEST, Op.ALLOC, Op.COPY, Op.IFNOTDONE, Op.JMPB, Op.FORK]
+    duplicator = ExperimentalMutator(
+        point_rate=0, indel_rate=0, burst_rate=0, duplication_rate=1,
+        block_deletion_rate=0, inversion_rate=0, max_genome=12)
+    duplicated = duplicator.mutate_at_birth(list(genome), random.Random(31))
+    assert len(genome) + 2 <= len(duplicated) <= 12
+    assert duplicator.last_events == ["segment_duplication"]
+
+    deleter = ExperimentalMutator(
+        point_rate=0, indel_rate=0, burst_rate=0, duplication_rate=0,
+        block_deletion_rate=1, inversion_rate=0)
+    deleted = deleter.mutate_at_birth(list(genome), random.Random(32))
+    assert 4 <= len(deleted) <= len(genome) - 2
+    assert deleter.last_events == ["block_deletion"]
+
+    inverter = ExperimentalMutator(
+        point_rate=0, indel_rate=0, burst_rate=0, duplication_rate=0,
+        block_deletion_rate=0, inversion_rate=1)
+    inverted = inverter.mutate_at_birth(list(genome), random.Random(33))
+    assert len(inverted) == len(genome)
+    assert sorted(inverted) == sorted(genome)
+    assert inverter.last_events == ["segment_inversion"]
+
+
+def test_history_links_mutation_mechanisms_to_later_reproduction(tmp_path):
+    history = LineageHistory(tmp_path / "mechanisms.sqlite3")
+    history.start_epoch(1, 1, 100.0)
+    parent = SimpleNamespace(genome=[Op.HARVEST], generation=0)
+    mutant = SimpleNamespace(genome=[Op.HARVEST, Op.HARVEST], generation=1)
+    history.record(1, [{"kind": "birth", "tick": 10, "organism": mutant,
+                        "parent": parent,
+                        "mutations": ["segment_duplication"]}])
+    child = SimpleNamespace(genome=list(mutant.genome), generation=2)
+    history.record(1, [{"kind": "birth", "tick": 20, "organism": child,
+                        "parent": mutant, "mutations": []}])
+    mechanism = history.summary(1)["mutationMechanisms"][0]
+    assert mechanism["mutation_type"] == "segment_duplication"
+    assert mechanism["origin_births"] == 1
+    assert mechanism["later_reproductions"] == 1
+    assert mechanism["max_generation_span"] == 1
+    history.close()
 
 
 def test_operator_can_retire_living_epoch_without_calling_it_extinct(tmp_path):

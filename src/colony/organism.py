@@ -23,6 +23,7 @@ class Organism:
     c: int = 1
     child: list[int] | None = None
     copy_index: int = 0
+    child_mutations: list[str] = field(default_factory=list)
     tasks_solved: dict[str, int] = field(default_factory=dict)
     births: int = 0
     harvested: float = 0.0
@@ -107,9 +108,13 @@ class Organism:
             self.awaiting_post_move_harvest = True
         elif op == Op.ALLOC and self.child is None:
             if colony.world.request_memory(len(self.genome)):
-                self.child, self.copy_index = [], 0
+                self.child, self.copy_index, self.child_mutations = [], 0, []
         elif op == Op.COPY and self.child is not None and self.copy_index < len(self.genome):
-            self.child.append(colony.mutator.copy_error(self.genome[self.copy_index], colony.rng))
+            source = self.genome[self.copy_index]
+            copied = colony.mutator.copy_error(source, colony.rng)
+            self.child.append(copied)
+            if copied != source:
+                self.child_mutations.append("point_substitution")
             self.copy_index += 1
         elif op == Op.IFNOTDONE and (self.child is None or self.copy_index >= len(self.genome)):
             next_ip = (self.ip + 2) % len(self.genome)
@@ -203,7 +208,10 @@ class Organism:
             other = colony.neighbor(self)
             if other and other.genome:
                 word = other.genome[self.copy_index % len(other.genome)]
-                self.child.append(colony.mutator.copy_error(word, colony.rng))
+                copied = colony.mutator.copy_error(word, colony.rng)
+                self.child.append(copied)
+                if copied != word:
+                    self.child_mutations.append("point_substitution")
                 self.copy_index += 1
                 self.foreign_copies = getattr(self, "foreign_copies", 0) + 1
                 colony.foreign_copies += 1
@@ -236,4 +244,4 @@ class Organism:
     def free_child(self, world) -> None:
         if self.child is not None:
             world.release_memory(len(self.genome))
-            self.child, self.copy_index = None, 0
+            self.child, self.copy_index, self.child_mutations = None, 0, []

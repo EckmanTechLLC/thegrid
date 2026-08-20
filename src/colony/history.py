@@ -59,6 +59,16 @@ class LineageHistory:
                 last_tick INTEGER NOT NULL,
                 PRIMARY KEY (epoch, parent_genome_id, child_genome_id)
             );
+            CREATE TABLE IF NOT EXISTS mutation_origins (
+                epoch INTEGER NOT NULL,
+                child_genome_id TEXT NOT NULL,
+                mutation_type TEXT NOT NULL,
+                origin_births INTEGER NOT NULL DEFAULT 0,
+                occurrences INTEGER NOT NULL DEFAULT 0,
+                first_tick INTEGER NOT NULL,
+                last_tick INTEGER NOT NULL,
+                PRIMARY KEY (epoch, child_genome_id, mutation_type)
+            );
             CREATE TABLE IF NOT EXISTS epochs (
                 epoch INTEGER PRIMARY KEY,
                 seed INTEGER NOT NULL,
@@ -144,6 +154,20 @@ class LineageHistory:
                             ON CONFLICT(epoch,parent_genome_id,child_genome_id) DO UPDATE SET
                                 births=births+1,last_tick=excluded.last_tick
                         """, (epoch, parent_id, child_id, 1, tick, tick))
+                    mutation_counts: dict[str, int] = {}
+                    for mutation_type in event.get("mutations", []):
+                        mutation_counts[mutation_type] = mutation_counts.get(mutation_type, 0) + 1
+                    for mutation_type, occurrences in mutation_counts.items():
+                        self._db.execute("""
+                            INSERT INTO mutation_origins(
+                                epoch,child_genome_id,mutation_type,origin_births,
+                                occurrences,first_tick,last_tick)
+                            VALUES(?,?,?,?,?,?,?)
+                            ON CONFLICT(epoch,child_genome_id,mutation_type) DO UPDATE SET
+                                origin_births=origin_births+1,
+                                occurrences=occurrences+excluded.occurrences,
+                                last_tick=excluded.last_tick
+                        """, (epoch, child_id, mutation_type, 1, occurrences, tick, tick))
                 else:
                     column = "starvation_deaths" if event["cause"] == "starvation" else "senescence_deaths"
                     self._db.execute(
@@ -269,6 +293,19 @@ class LineageHistory:
                 SELECT * FROM ecology_buckets WHERE epoch=?
                 ORDER BY bucket DESC LIMIT 24
             """, (current_epoch,)).fetchall()
+            mechanism_rows = self._db.execute("""
+                SELECT o.mutation_type,
+                       sum(o.origin_births) AS origin_births,
+                       sum(o.occurrences) AS occurrences,
+                       count(*) AS genomes,
+                       max(s.max_generation-s.first_generation) AS max_generation_span,
+                       max(0,sum(s.births)-sum(o.origin_births)) AS later_reproductions
+                FROM mutation_origins o
+                JOIN genome_stats s ON s.epoch=o.epoch AND s.genome_id=o.child_genome_id
+                WHERE o.epoch=?
+                GROUP BY o.mutation_type
+                ORDER BY later_reproductions DESC,occurrences DESC
+            """, (current_epoch,)).fetchall()
         successes = []
         for source_row in success_rows:
             row = dict(source_row)
@@ -310,6 +347,7 @@ class LineageHistory:
             "transitions": [dict(row) for row in transitions],
             "mutationSuccess": successes[:limit],
             "ecology": ecology,
+            "mutationMechanisms": [dict(row) for row in mechanism_rows],
             "epochs": [dict(row) for row in epochs],
         }
 

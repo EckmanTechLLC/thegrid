@@ -82,7 +82,9 @@ class Habitat:
                 colony.mutator = OdinMutator(self.state_path.parent / "operator")
             elif self.physical and self.mutator_kind == "random":
                 from .mutation import ExperimentalMutator
-                colony.mutator = ExperimentalMutator()
+                if not isinstance(colony.mutator, ExperimentalMutator):
+                    colony.mutator = ExperimentalMutator()
+                colony.mutator.upgrade()
             config = colony.world.config
             for name in ("signals", "signal_strength", "structures"):
                 if not hasattr(colony.world, name):
@@ -101,6 +103,7 @@ class Habitat:
             colony.experimental_ops = getattr(colony, "experimental_ops", Counter())
             colony.forecast_attempts = getattr(colony, "forecast_attempts", 0)
             colony.forecasts_solved = getattr(colony, "forecasts_solved", 0)
+            colony.mutation_mechanisms = getattr(colony, "mutation_mechanisms", Counter())
             colony.tasks = TemporalTaskEnvironment()
             colony.lifecycle_events = getattr(colony, "lifecycle_events", deque())
             for organism in colony.organisms:
@@ -114,6 +117,8 @@ class Habitat:
                         setattr(organism, name, False)
                 if not hasattr(organism, "scratch"):
                     organism.scratch = [0] * 8
+                if not hasattr(organism, "child_mutations"):
+                    organism.child_mutations = []
                 defaults = {
                     "last_load_slot": None,
                     "last_load_tick": -1,
@@ -297,6 +302,7 @@ class Habitat:
             "forecastAttempts": colony.forecast_attempts,
             "forecastsSolved": colony.forecasts_solved,
             "activeForecasts": sum(o.forecast_target is not None for o in colony.organisms),
+            "mutationMechanisms": dict(colony.mutation_mechanisms),
             "moves": sum(getattr(o, "moves", 0) for o in colony.organisms),
             "scans": sum(getattr(o, "scans", 0) for o in colony.organisms),
             "guidedMoves": sum(getattr(o, "guided_moves", 0) for o in colony.organisms),

@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 import os
 import random
+from collections import Counter
 from typing import Protocol
 
 from .isa import ISA, NUM_OPS, NAME_TO_OP, disassemble
@@ -73,18 +74,68 @@ class ExperimentalMutator(RandomMutator):
 
     def __init__(self, point_rate: float = 0.012, indel_rate: float = 0.06,
                  burst_rate: float = 0.025, burst_min: int = 2,
-                 burst_max: int = 4):
+                 burst_max: int = 4, duplication_rate: float = 0.015,
+                 block_deletion_rate: float = 0.01,
+                 inversion_rate: float = 0.01, max_genome: int = 64):
         super().__init__(point_rate=point_rate, indel_rate=indel_rate)
         self.burst_rate = burst_rate
         self.burst_min = burst_min
         self.burst_max = burst_max
+        self.duplication_rate = duplication_rate
+        self.block_deletion_rate = block_deletion_rate
+        self.inversion_rate = inversion_rate
+        self.max_genome = max_genome
+        self.last_events: list[str] = []
+        self.mechanism_counts: Counter = Counter()
+
+    def upgrade(self) -> None:
+        """Populate new controls when restoring an older checkpoint."""
+        defaults = {
+            "duplication_rate": 0.015,
+            "block_deletion_rate": 0.01,
+            "inversion_rate": 0.01,
+            "max_genome": 64,
+            "last_events": [],
+            "mechanism_counts": Counter(),
+        }
+        for name, value in defaults.items():
+            if not hasattr(self, name):
+                setattr(self, name, value)
 
     def mutate_at_birth(self, genome: list[int], rng: random.Random) -> list[int]:
-        genome = super().mutate_at_birth(genome, rng)
-        if genome and rng.random() < self.burst_rate:
+        self.upgrade()
+        events: list[str] = []
+        if genome and rng.random() < self.indel_rate:
+            if rng.random() < 0.5 and len(genome) < self.max_genome:
+                genome.insert(rng.randrange(len(genome) + 1), rng.randrange(NUM_OPS))
+                events.append("single_insertion")
+            elif len(genome) > 4:
+                del genome[rng.randrange(len(genome))]
+                events.append("single_deletion")
+        if genome and rng.random() < self.burst_rate and len(genome) < self.max_genome:
             length = rng.randint(self.burst_min, self.burst_max)
+            length = min(length, self.max_genome - len(genome))
             position = rng.randrange(len(genome) + 1)
             genome[position:position] = [rng.randrange(NUM_OPS) for _ in range(length)]
+            events.append("random_burst")
+        if len(genome) >= 2 and rng.random() < self.duplication_rate and len(genome) < self.max_genome:
+            length = min(rng.randint(2, 6), len(genome), self.max_genome - len(genome))
+            start = rng.randrange(len(genome) - length + 1)
+            position = rng.randrange(len(genome) + 1)
+            genome[position:position] = genome[start:start + length]
+            events.append("segment_duplication")
+        if len(genome) > 5 and rng.random() < self.block_deletion_rate:
+            length = min(rng.randint(2, 4), len(genome) - 4)
+            start = rng.randrange(len(genome) - length + 1)
+            del genome[start:start + length]
+            events.append("block_deletion")
+        if len(genome) >= 3 and rng.random() < self.inversion_rate:
+            length = min(rng.randint(2, 6), len(genome))
+            start = rng.randrange(len(genome) - length + 1)
+            genome[start:start + length] = reversed(genome[start:start + length])
+            events.append("segment_inversion")
+        self.last_events = events
+        self.mechanism_counts.update(events)
         return genome
 
 
