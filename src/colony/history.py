@@ -335,6 +335,20 @@ class LineageHistory:
                 GROUP BY o.mutation_type
                 ORDER BY later_reproductions DESC,occurrences DESC
             """, (current_epoch,)).fetchall()
+            communication_rows = self._db.execute("""
+                SELECT g.genome_id,g.source,s.births,s.first_tick,s.last_tick,
+                       s.max_generation-s.first_generation AS observed_generations,
+                       CASE
+                           WHEN g.source LIKE '%signal%' AND g.source LIKE '%listen%'
+                               THEN 'signal+listen'
+                           WHEN g.source LIKE '%listen%' THEN 'listen'
+                           ELSE 'signal'
+                       END AS role
+                FROM genome_stats s JOIN genomes g USING(genome_id)
+                WHERE s.epoch=? AND (g.source LIKE '%signal%' OR g.source LIKE '%listen%')
+                ORDER BY observed_generations DESC,s.births DESC,s.last_tick DESC
+                LIMIT ?
+            """, (current_epoch, limit)).fetchall()
         successes = []
         for source_row in success_rows:
             row = dict(source_row)
@@ -377,6 +391,7 @@ class LineageHistory:
             "mutationSuccess": successes[:limit],
             "ecology": ecology,
             "mutationMechanisms": [dict(row) for row in mechanism_rows],
+            "communicationLineages": [dict(row) for row in communication_rows],
             "epochs": [dict(row) for row in epochs],
         }
 

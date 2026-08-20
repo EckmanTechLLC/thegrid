@@ -42,6 +42,9 @@ class WorldConfig:
     storm_warning: int = 100         # input cue lead time
     drought_fraction: float = 0.08   # energy retained in the drought quadrant
     bloom_fraction: float = 0.75     # minimum capacity after a bloom
+    signal_radius: int = 3
+    signal_duration: int = 24
+    signal_attenuation: int = 5
     seed: int = 1337
 
 
@@ -92,15 +95,30 @@ class World:
         return x % self.config.width, y % self.config.height
 
     def signal(self, x: int, y: int, value: int) -> None:
-        x, y = self.wrap(x, y)
-        self.signals[y][x] = value & 0xFF
-        self.signal_strength[y][x] = 12
+        radius = getattr(self.config, "signal_radius", 3)
+        duration = getattr(self.config, "signal_duration", 24)
+        attenuation = getattr(self.config, "signal_attenuation", 5)
+        for dy in range(-radius, radius + 1):
+            for dx in range(-radius, radius + 1):
+                distance = abs(dx) + abs(dy)
+                if distance > radius:
+                    continue
+                sx, sy = self.wrap(x + dx, y + dy)
+                strength = max(1, duration - distance * attenuation)
+                if strength >= self.signal_strength[sy][sx]:
+                    self.signals[sy][sx] = value & 0xFF
+                    self.signal_strength[sy][sx] = strength
 
     def listen(self, x: int, y: int) -> int:
         cells = [self.wrap(x, y), self.wrap(x, y - 1), self.wrap(x + 1, y),
                  self.wrap(x, y + 1), self.wrap(x - 1, y)]
         sx, sy = max(cells, key=lambda p: self.signal_strength[p[1]][p[0]])
         return self.signals[sy][sx] if self.signal_strength[sy][sx] else 0
+
+    def listen_strength(self, x: int, y: int) -> int:
+        cells = [self.wrap(x, y), self.wrap(x, y - 1), self.wrap(x + 1, y),
+                 self.wrap(x, y + 1), self.wrap(x - 1, y)]
+        return max(self.signal_strength[sy][sx] for sx, sy in cells)
 
     def build(self, x: int, y: int) -> None:
         x, y = self.wrap(x, y)

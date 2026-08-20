@@ -41,6 +41,13 @@ in the drought region are halved. During the final 100 ticks before a storm,
 kill organisms directly, and the observer exposes the countdown and durable
 storm events.
 
+Signals radiate to Manhattan radius three, begin with strength 24, lose five
+strength per tile, and decay once per tick. Stronger broadcasts replace weaker
+ones. Telemetry distinguishes signals heard, movement immediately guided by a
+heard signal, and energy harvested after that movement; the fossil record also
+ranks persistent `signal` and `listen` genomes. No energy reward is attached to
+communication itself.
+
 The installed colony-two observer listens on LAN port 8788. Its state, history,
 and mutation queue live under `~/.local/state/thegrid-colony2`, wholly separate
 from epoch 1207. Both colony services receive the same bounded allocation: 5%

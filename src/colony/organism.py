@@ -30,6 +30,9 @@ class Organism:
     last_inputs: tuple[int, int] = (0, 0)
     input_index: int = 0
     signals_sent: int = 0
+    signals_heard: int = 0
+    signal_guided_moves: int = 0
+    post_signal_harvested: float = 0.0
     structures_built: int = 0
     neighbor_reads: int = 0
     foreign_copies: int = 0
@@ -39,7 +42,9 @@ class Organism:
     post_move_harvested: float = 0.0
     task_inputs_seen: int = 0
     scan_pending: bool = False
+    listen_pending: bool = False
     awaiting_post_move_harvest: bool = False
+    awaiting_signal_harvest: bool = False
     scratch: list[int] = field(default_factory=lambda: [0] * 8)
     last_load_slot: int | None = None
     last_load_tick: int = -1
@@ -58,6 +63,9 @@ class Organism:
             "harvested": round(self.harvested, 2),
             "tasks_solved": dict(self.tasks_solved), "genome_length": len(self.genome),
             "signals_sent": getattr(self, "signals_sent", 0),
+            "signals_heard": getattr(self, "signals_heard", 0),
+            "signal_guided_moves": getattr(self, "signal_guided_moves", 0),
+            "post_signal_harvested": round(getattr(self, "post_signal_harvested", 0.0), 2),
             "structures_built": getattr(self, "structures_built", 0),
             "neighbor_reads": getattr(self, "neighbor_reads", 0),
             "foreign_copies": getattr(self, "foreign_copies", 0),
@@ -93,18 +101,26 @@ class Organism:
             if getattr(self, "awaiting_post_move_harvest", False):
                 self.post_move_harvested = getattr(self, "post_move_harvested", 0.0) + gained
                 self.awaiting_post_move_harvest = False
+            if getattr(self, "awaiting_signal_harvest", False):
+                self.post_signal_harvested = getattr(self, "post_signal_harvested", 0.0) + gained
+                self.awaiting_signal_harvest = False
         elif op == Op.SCAN:
             options = [(0, -1), (1, 0), (0, 1), (-1, 0)]
             self.a = max(range(4), key=lambda i: colony.world.tile_energy(self.x + options[i][0], self.y + options[i][1]))
             self.scans = getattr(self, "scans", 0) + 1
             self.scan_pending = True
+            self.listen_pending = False
         elif op == Op.MOVE:
             dx, dy = [(0, -1), (1, 0), (0, 1), (-1, 0)][self.a % 4]
             self.x, self.y = colony.world.wrap(self.x + dx, self.y + dy)
             self.moves = getattr(self, "moves", 0) + 1
             if getattr(self, "scan_pending", False):
                 self.guided_moves = getattr(self, "guided_moves", 0) + 1
+            if getattr(self, "listen_pending", False):
+                self.signal_guided_moves = getattr(self, "signal_guided_moves", 0) + 1
+                self.awaiting_signal_harvest = True
             self.scan_pending = False
+            self.listen_pending = False
             self.awaiting_post_move_harvest = True
         elif op == Op.ALLOC and self.child is None:
             if colony.world.request_memory(len(self.genome)):
@@ -192,7 +208,12 @@ class Organism:
             colony.world.signal(self.x, self.y, self.a)
             self.signals_sent = getattr(self, "signals_sent", 0) + 1
         elif op == Op.LISTEN:
+            strength = colony.world.listen_strength(self.x, self.y)
             self.a = colony.world.listen(self.x, self.y)
+            self.listen_pending = strength > 0
+            self.scan_pending = False
+            if strength > 0:
+                self.signals_heard = getattr(self, "signals_heard", 0) + 1
         elif op == Op.BUILD:
             if self.energy >= 4.0:
                 self.energy -= 4.0

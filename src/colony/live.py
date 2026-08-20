@@ -109,10 +109,12 @@ class Habitat:
             for organism in colony.organisms:
                 for name in ("signals_sent", "structures_built", "neighbor_reads", "foreign_copies",
                              "moves", "scans", "guided_moves", "post_move_harvested",
-                             "task_inputs_seen"):
+                             "task_inputs_seen", "signals_heard", "signal_guided_moves",
+                             "post_signal_harvested"):
                     if not hasattr(organism, name):
                         setattr(organism, name, 0)
-                for name in ("scan_pending", "awaiting_post_move_harvest"):
+                for name in ("scan_pending", "listen_pending", "awaiting_post_move_harvest",
+                             "awaiting_signal_harvest"):
                     if not hasattr(organism, name):
                         setattr(organism, name, False)
                 if not hasattr(organism, "scratch"):
@@ -291,6 +293,11 @@ class Habitat:
                 "warningTicks": getattr(world.config, "storm_warning", 100),
             },
             "activeSignals": active_signals,
+            "signalsHeard": sum(getattr(o, "signals_heard", 0) for o in colony.organisms),
+            "signalGuidedMoves": sum(getattr(o, "signal_guided_moves", 0)
+                                       for o in colony.organisms),
+            "postSignalHarvested": round(sum(getattr(o, "post_signal_harvested", 0.0)
+                                               for o in colony.organisms), 2),
             "builtTiles": built_tiles,
             "signalField": "".join("0123456789abc"[min(12, value)]
                                    for row in world.signal_strength for value in row),
@@ -337,6 +344,9 @@ class Habitat:
             "scans": getattr(organism, "scans", 0),
             "guidedMoves": getattr(organism, "guided_moves", 0),
             "signals": getattr(organism, "signals_sent", 0),
+            "signalsHeard": getattr(organism, "signals_heard", 0),
+            "signalGuidedMoves": getattr(organism, "signal_guided_moves", 0),
+            "postSignalHarvested": round(getattr(organism, "post_signal_harvested", 0.0), 2),
             "structures": getattr(organism, "structures_built", 0),
             "neighborReads": getattr(organism, "neighbor_reads", 0),
             "foreignCopies": getattr(organism, "foreign_copies", 0),

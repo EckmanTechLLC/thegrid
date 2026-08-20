@@ -113,6 +113,30 @@ def test_ecology_instructions_enable_communication_construction_and_parasitism()
     assert colony.foreign_copies == 1
 
 
+def test_signals_radiate_and_can_guide_harvest_movement():
+    world = World(WorldConfig(width=8, height=8, memory_cap=500, seed=23))
+    colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
+                    seed=23, founders=2)
+    sender, receiver = colony.organisms
+    sender.x, sender.y = 1, 1
+    receiver.x, receiver.y = 4, 1
+    sender.a, sender.genome = 73, [Op.SIGNAL]
+    sender.execute(colony)
+    assert world.signal_strength[1][1] == 24
+    assert world.signal_strength[1][4] == 9
+
+    receiver.genome = [Op.LISTEN]
+    receiver.execute(colony)
+    assert receiver.a == 73
+    assert receiver.signals_heard == 1
+    receiver.genome = [Op.MOVE]
+    receiver.execute(colony)
+    receiver.genome = [Op.HARVEST]
+    receiver.execute(colony)
+    assert receiver.signal_guided_moves == 1
+    assert receiver.post_signal_harvested > 0
+
+
 def test_task_reward_requires_two_fresh_inputs_and_is_single_use():
     colony = Colony(World(WorldConfig(width=4, height=4, memory_cap=100, seed=5)),
                     RandomMutator(point_rate=0, indel_rate=0), seed=5, founders=1)
