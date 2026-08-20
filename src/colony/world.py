@@ -38,6 +38,10 @@ class WorldConfig:
     # bursts and self-regulates (hot -> costs rise -> deaths -> cools).
     heat_threshold: float = 22.0     # below this, no throttling
     heat_penalty: float = 0.04       # cost multiplier added per degree over
+    storm_interval: int = 1000       # Colony Two resource-weather cadence
+    storm_warning: int = 100         # input cue lead time
+    drought_fraction: float = 0.08   # energy retained in the drought quadrant
+    bloom_fraction: float = 0.75     # minimum capacity after a bloom
     seed: int = 1337
 
 
@@ -61,6 +65,10 @@ class World:
         self.heat: float = 0.0
         self.instructions_this_tick: int = 0
         self.tick: int = 0
+        self.storm_count: int = 0
+        self.last_storm_tick: int = -1
+        self.last_drought_quadrant: int | None = None
+        self.last_bloom_quadrant: int | None = None
 
     def _initial_energy(self) -> float:
         c = self.config
@@ -133,8 +141,43 @@ class World:
 
     # ── tick ──────────────────────────────────────────────────────────────
 
+    def storm_regions(self, tick: int | None = None) -> tuple[int, int]:
+        interval = getattr(self.config, "storm_interval", 1000)
+        cycle = (self.tick if tick is None else tick) // interval
+        drought = cycle % 4
+        return drought, (drought + 2) % 4
+
+    def apply_resource_storm(self) -> bool:
+        """Apply Colony Two's periodic spatial drought/bloom disturbance."""
+        c = self.config
+        interval = getattr(c, "storm_interval", 1000)
+        if not interval or not self.tick or self.tick % interval:
+            return False
+        drought, bloom = self.storm_regions()
+        drought_fraction = getattr(c, "drought_fraction", 0.08)
+        bloom_floor = c.tile_capacity * getattr(c, "bloom_fraction", 0.75)
+        for y, row in enumerate(self.energy):
+            for x in range(c.width):
+                quadrant = (x >= c.width // 2) + 2 * (y >= c.height // 2)
+                if quadrant == drought:
+                    row[x] *= drought_fraction
+                    self.structures[y][x] //= 2
+                elif quadrant == bloom:
+                    row[x] = max(row[x], bloom_floor)
+        self.storm_count = getattr(self, "storm_count", 0) + 1
+        self.last_storm_tick = self.tick
+        self.last_drought_quadrant = drought
+        self.last_bloom_quadrant = bloom
+        return True
+
+    @property
+    def next_storm_tick(self) -> int:
+        interval = getattr(self.config, "storm_interval", 1000)
+        return ((self.tick // interval) + 1) * interval
+
     def step(self) -> None:
         c = self.config
+        self.apply_resource_storm()
         phase = (self.tick // 2000) % 4
         for y, row in enumerate(self.energy):
             for x in range(c.width):

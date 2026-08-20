@@ -27,6 +27,14 @@ cumulative experimental-instruction executions, attempts, solutions, and live
 pending challenges. Colony One does not have this pressure and remains the
 unchanged reference habitat.
 
+Resource weather prevents a settled monoculture from seeing a permanently
+stationary world. Every 1,000 ticks one quadrant retains only 8% of its stored
+energy while the opposite quadrant blooms to at least 75% capacity; structures
+in the drought region are halved. During the final 100 ticks before a storm,
+`input` returns the upcoming drought and bloom quadrant numbers. Storms never
+kill organisms directly, and the observer exposes the countdown and durable
+storm events.
+
 The installed colony-two observer listens on LAN port 8788. Its state, history,
 and mutation queue live under `~/.local/state/thegrid-colony2`, wholly separate
 from epoch 1207. Both colony services receive the same bounded allocation: 5%

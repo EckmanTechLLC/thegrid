@@ -154,6 +154,7 @@ class SubstrateWorld(World):
         # Tile chemistry remains part of the habitat, but memory, scheduler
         # time, and thermal pressure are taken directly from Linux/hardware.
         c = self.config
+        self.apply_resource_storm()
         phase = (self.tick // 2000) % 4
         for y, row in enumerate(self.energy):
             for x in range(c.width):

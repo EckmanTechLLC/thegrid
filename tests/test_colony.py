@@ -357,3 +357,29 @@ def test_operator_can_retire_living_epoch_without_calling_it_extinct(tmp_path):
     assert retired["end_reason"] == "playground reset"
     assert habitat.events[-1]["text"] == "epoch intentionally retired; epoch 2 seeded"
     habitat.history.close()
+
+
+def test_resource_storm_drains_one_quadrant_and_blooms_the_opposite():
+    config = WorldConfig(width=4, height=4, tile_capacity=100,
+                         storm_interval=10, drought_fraction=0.1,
+                         bloom_fraction=0.8, seed=22)
+    world = World(config)
+    world.energy = [[50.0] * 4 for _ in range(4)]
+    world.structures = [[4] * 4 for _ in range(4)]
+    world.tick = 10
+    assert world.apply_resource_storm()
+    assert world.storm_count == 1
+    assert world.last_drought_quadrant == 1
+    assert world.last_bloom_quadrant == 3
+    assert world.energy[0][2] == 5.0
+    assert world.structures[0][2] == 2
+    assert world.energy[2][2] == 80.0
+    assert world.energy[0][0] == 50.0
+
+
+def test_storm_warning_replaces_inputs_only_during_warning_window():
+    tasks = TemporalTaskEnvironment(storm_interval=1000, storm_warning=100)
+    assert tasks.inputs(899, 7) != (1, 3)
+    assert tasks.inputs(900, 7) == (1, 3)
+    assert tasks.inputs(999, 7) == (1, 3)
+    assert tasks.inputs(1000, 7) != (2, 0)

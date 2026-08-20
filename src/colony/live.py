@@ -48,6 +48,7 @@ class Habitat:
         self.tile_latest: dict[tuple[int, int], list[dict]] = {}
         self.running = True
         self._last_tasks = set(self.colony.task_firsts)
+        self._last_storm_count = getattr(self.colony.world, "storm_count", 0)
         self.latest = self.snapshot()
 
     def _new_colony(self) -> Colony:
@@ -87,6 +88,14 @@ class Habitat:
                 if not hasattr(colony.world, name):
                     setattr(colony.world, name,
                             [[0] * config.width for _ in range(config.height)])
+            for name, value in {
+                "storm_count": 0,
+                "last_storm_tick": -1,
+                "last_drought_quadrant": None,
+                "last_bloom_quadrant": None,
+            }.items():
+                if not hasattr(colony.world, name):
+                    setattr(colony.world, name, value)
             colony.neighbor_reads = getattr(colony, "neighbor_reads", 0)
             colony.foreign_copies = getattr(colony, "foreign_copies", 0)
             colony.experimental_ops = getattr(colony, "experimental_ops", Counter())
@@ -161,6 +170,7 @@ class Habitat:
             raise RuntimeError("fresh epoch could not allocate founders")
         self.history.start_epoch(self.epoch, self.seed, self.started_at,
                                  self.colony.organisms)
+        self._last_storm_count = 0
         self.events.append({
             "tick": old_tick,
             "text": f"epoch intentionally retired; epoch {self.epoch} seeded",
@@ -197,7 +207,18 @@ class Habitat:
                                      self.colony.organisms)
             self.events.append({"tick": last_tick, "text": "colony became extinct; new epoch seeded"})
             self._last_tasks.clear()
+            self._last_storm_count = 0
         self.colony.step()
+        storm_count = getattr(self.colony.world, "storm_count", 0)
+        if storm_count > self._last_storm_count:
+            labels = ("NW", "NE", "SW", "SE")
+            drought = self.colony.world.last_drought_quadrant
+            bloom = self.colony.world.last_bloom_quadrant
+            self.events.append({
+                "tick": self.colony.world.last_storm_tick,
+                "text": f"resource storm: {labels[drought]} drought · {labels[bloom]} bloom",
+            })
+            self._last_storm_count = storm_count
         for event in self.colony.lifecycle_events:
             if event["kind"] == "death":
                 self.recent_deaths.append(self._organism_detail(
@@ -256,6 +277,14 @@ class Habitat:
             "ancestor": encode_genome(build_ancestor()),
             "tasks": colony.task_firsts,
             "climatePhase": (world.tick // 2000) % 4,
+            "weather": {
+                "storms": getattr(world, "storm_count", 0),
+                "lastTick": getattr(world, "last_storm_tick", -1),
+                "droughtQuadrant": getattr(world, "last_drought_quadrant", None),
+                "bloomQuadrant": getattr(world, "last_bloom_quadrant", None),
+                "nextTick": world.next_storm_tick,
+                "warningTicks": getattr(world.config, "storm_warning", 100),
+            },
             "activeSignals": active_signals,
             "builtTiles": built_tiles,
             "signalField": "".join("0123456789abc"[min(12, value)]

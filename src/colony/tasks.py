@@ -48,6 +48,16 @@ class TemporalTaskEnvironment(TaskEnvironment):
     forecast_delay: int = 24
     forecast_window: int = 32
     forecast_reward: float = 18.0
+    storm_interval: int = 1000
+    storm_warning: int = 100
+
+    def inputs(self, tick: int, organism_id: int) -> tuple[int, int]:
+        phase = tick % self.storm_interval
+        if phase >= self.storm_interval - self.storm_warning:
+            upcoming_cycle = tick // self.storm_interval + 1
+            drought = upcoming_cycle % 4
+            return drought, (drought + 2) % 4
+        return super().inputs(tick, organism_id)
 
     def forecast_target(self, inputs: tuple[int, int]) -> int:
         return (inputs[0] + inputs[1]) & MASK
