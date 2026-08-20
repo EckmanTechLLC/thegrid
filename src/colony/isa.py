@@ -34,6 +34,7 @@ class Op(IntEnum):
     LOAD = 26
     STORE = 27
     JMPR = 28
+    SALVAGE = 29
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,7 @@ ISA = [
     Instruction("load", 0.35, "load scratch byte B modulo 8 into A"),
     Instruction("store", 0.45, "store A in scratch byte B modulo 8"),
     Instruction("jmpr", 0.30, "jump relative by C modulo 15 minus 7"),
+    Instruction("salvage", 0.55, "reclaim decaying scrap from the current tile"),
 ]
 
 NUM_OPS = len(ISA)
@@ -88,7 +90,7 @@ def build_ancestor() -> list[int]:
 
 
 def build_founder_palette() -> list[list[int]]:
-    """Twelve viable replicators with different immediately usable traits."""
+    """Viable replicators with different immediately usable traits."""
     core = build_ancestor()
     return [
         core,
@@ -107,6 +109,7 @@ def build_founder_palette() -> list[list[int]]:
          Op.IFNOTDONE, Op.JMPB, Op.FORK, Op.SCAN, Op.MOVE],
         [Op.HARVEST, Op.NOP, Op.HARVEST, Op.ALLOC, Op.COPY,
          Op.IFNOTDONE, Op.JMPB, Op.FORK, Op.NOP, Op.SCAN, Op.MOVE],
+        [*core, Op.SALVAGE],
     ]
 
 

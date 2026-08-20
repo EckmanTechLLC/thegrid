@@ -70,6 +70,7 @@ class SubstrateWorld(World):
     def from_world(cls, old: World) -> "SubstrateWorld":
         new = cls(old.config)
         new.energy = old.energy
+        new.scrap = getattr(old, "scrap", new.scrap)
         new.memory_used = old.memory_used
         new.instructions_this_tick = old.instructions_this_tick
         new.tick = old.tick
@@ -170,6 +171,10 @@ class SubstrateWorld(World):
                         self.signals[y][x] = 0
                 if self.tick and self.tick % 500 == 0 and self.structures[y][x] > 0:
                     self.structures[y][x] -= 1
+                if self.scrap[y][x] > 0:
+                    self.scrap[y][x] *= 0.997
+                    if self.scrap[y][x] < 0.05:
+                        self.scrap[y][x] = 0.0
         self.instructions_this_tick = 0
         self.tick += 1
 

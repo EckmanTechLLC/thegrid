@@ -28,7 +28,7 @@ from .world import WorldConfig
 
 
 class Habitat:
-    def __init__(self, state_path: Path, seed: int = 42, founders: int = 12,
+    def __init__(self, state_path: Path, seed: int = 42, founders: int = 13,
                  physical: bool = True, mutator_kind: str = "odin",
                  width: int = 48, height: int = 48):
         self.state_path = state_path
@@ -97,6 +97,8 @@ class Habitat:
                 if not hasattr(colony.world, name):
                     setattr(colony.world, name,
                             [[0] * config.width for _ in range(config.height)])
+            if not hasattr(colony.world, "scrap"):
+                colony.world.scrap = [[0.0] * config.width for _ in range(config.height)]
             for name, value in {
                 "storm_count": 0,
                 "last_storm_tick": -1,
@@ -111,6 +113,8 @@ class Habitat:
             colony.forecast_attempts = getattr(colony, "forecast_attempts", 0)
             colony.forecasts_solved = getattr(colony, "forecasts_solved", 0)
             colony.mutation_mechanisms = getattr(colony, "mutation_mechanisms", Counter())
+            colony.scrap_deposited = getattr(colony, "scrap_deposited", 0.0)
+            colony.salvaged = getattr(colony, "salvaged", 0.0)
             colony.tasks = TemporalTaskEnvironment()
             colony.lifecycle_events = getattr(colony, "lifecycle_events", deque())
             for organism in colony.organisms:
@@ -128,6 +132,8 @@ class Habitat:
                     organism.scratch = [0] * 8
                 if not hasattr(organism, "child_mutations"):
                     organism.child_mutations = []
+                if not hasattr(organism, "salvaged"):
+                    organism.salvaged = 0.0
                 defaults = {
                     "last_load_slot": None,
                     "last_load_tick": -1,
@@ -321,6 +327,12 @@ class Habitat:
                                    for row in world.signal_strength for value in row),
             "structureField": "".join(ALPHABET[min(31, value)]
                                       for row in world.structures for value in row),
+            "scrapField": "".join(ALPHABET[min(31, int(value))]
+                                  for row in world.scrap for value in row),
+            "scrapTiles": sum(value > 0 for row in world.scrap for value in row),
+            "scrapAvailable": round(sum(sum(row) for row in world.scrap), 2),
+            "scrapDeposited": round(colony.scrap_deposited, 2),
+            "salvaged": round(colony.salvaged, 2),
             "neighborReads": colony.neighbor_reads,
             "foreignCopies": colony.foreign_copies,
             "experimentalOps": dict(colony.experimental_ops),
@@ -366,6 +378,8 @@ class Habitat:
             "signalGuidedMoves": getattr(organism, "signal_guided_moves", 0),
             "postSignalHarvested": round(getattr(organism, "post_signal_harvested", 0.0), 2),
             "structures": getattr(organism, "structures_built", 0),
+            "salvaged": round(getattr(organism, "salvaged", 0.0), 2),
+            "scrapHere": round(self.colony.world.scrap[organism.y][organism.x], 2),
             "neighborReads": getattr(organism, "neighbor_reads", 0),
             "foreignCopies": getattr(organism, "foreign_copies", 0),
             "scratch": list(getattr(organism, "scratch", [])) or None,

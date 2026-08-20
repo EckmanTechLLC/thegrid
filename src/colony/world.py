@@ -65,6 +65,7 @@ class World:
         self.signals = [[0] * c.width for _ in range(c.height)]
         self.signal_strength = [[0] * c.width for _ in range(c.height)]
         self.structures = [[0] * c.width for _ in range(c.height)]
+        self.scrap = [[0.0] * c.width for _ in range(c.height)]
 
         self.memory_used: int = 0
         self.heat: float = 0.0
@@ -133,7 +134,7 @@ class World:
             elif op in (Op.HARVEST, Op.BUILD):
                 local = 1.3
         elif biome == 2:  # engineer: construction pays, motion/foraging do not
-            if op == Op.BUILD:
+            if op in (Op.BUILD, Op.SALVAGE):
                 local = 0.45
             elif op in (Op.HARVEST, Op.MOVE):
                 local = 1.3
@@ -182,6 +183,20 @@ class World:
     def build(self, x: int, y: int) -> None:
         x, y = self.wrap(x, y)
         self.structures[y][x] = min(20, self.structures[y][x] + 1)
+
+    def deposit_scrap(self, x: int, y: int, genome_words: int,
+                      remaining_energy: float) -> float:
+        """Leave bounded embodied hardware behind without refunding birth cost."""
+        x, y = self.wrap(x, y)
+        amount = min(12.0, genome_words * 0.45 + max(0.0, remaining_energy) * 0.20)
+        self.scrap[y][x] = min(31.0, self.scrap[y][x] + amount)
+        return amount
+
+    def salvage(self, x: int, y: int) -> float:
+        x, y = self.wrap(x, y)
+        taken = min(5.0, self.scrap[y][x])
+        self.scrap[y][x] -= taken
+        return taken * (1.25 if self.biome(x, y) == 2 else 1.0)
 
     # ── memory ────────────────────────────────────────────────────────────
 
@@ -270,6 +285,10 @@ class World:
                         self.signals[y][x] = 0
                 if self.tick and self.tick % 500 == 0 and self.structures[y][x] > 0:
                     self.structures[y][x] -= 1
+                if self.scrap[y][x] > 0:
+                    self.scrap[y][x] *= 0.997
+                    if self.scrap[y][x] < 0.05:
+                        self.scrap[y][x] = 0.0
 
         self.heat = self.heat * c.heat_decay + self.instructions_this_tick * c.heat_per_instruction
         self.instructions_this_tick = 0

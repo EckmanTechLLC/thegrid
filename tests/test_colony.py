@@ -44,7 +44,7 @@ def test_ancestor_is_valid():
 
 def test_diverse_founders_are_unique_viable_and_fit_large_map_encoding():
     palette = build_founder_palette()
-    assert len(palette) == len({tuple(genome) for genome in palette}) == 12
+    assert len(palette) == len({tuple(genome) for genome in palette}) == 13
     for lineage, genome in enumerate(palette):
         world = World(WorldConfig(width=48, height=48, tile_regen=0.5,
                                   memory_cap=500, seed=100 + lineage))
@@ -55,7 +55,7 @@ def test_diverse_founders_are_unique_viable_and_fit_large_map_encoding():
             colony.step()
         assert colony.births > 0, f"founder {lineage} did not reproduce"
     colony = Colony(World(WorldConfig(width=48, height=48, seed=5)),
-                    founders=12, founder_genomes=palette)
+                    founders=len(palette), founder_genomes=palette)
     colony.organisms[0].x, colony.organisms[0].y = 47, 47
     encoded = encode_positions(colony, 48)
     assert len(encoded) == 4 * len(colony.organisms)
@@ -65,10 +65,10 @@ def test_diverse_founders_are_unique_viable_and_fit_large_map_encoding():
 def test_diverse_epoch_seeds_every_lineage_on_a_rich_distinct_patch():
     world = World(WorldConfig(width=48, height=48, seed=42))
     colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
-                    seed=42, founders=12,
+                    seed=42, founders=13,
                     founder_genomes=build_founder_palette())
     positions = {(o.x, o.y) for o in colony.organisms}
-    assert len(positions) == 12
+    assert len(positions) == 13
     assert all(world.tile_energy(o.x, o.y) == world.config.tile_capacity
                for o in colony.organisms)
     assert all(o.energy == 48.0 for o in colony.organisms)
@@ -76,12 +76,12 @@ def test_diverse_epoch_seeds_every_lineage_on_a_rich_distinct_patch():
 
 def test_epoch_can_inoculate_four_organisms_per_lineage():
     colony = Colony(World(WorldConfig(width=48, height=48, seed=42)),
-                    seed=42, founders=12,
+                    seed=42, founders=13,
                     founder_genomes=build_founder_palette(), founder_copies=4)
     counts = Counter(o.lineage for o in colony.organisms)
-    assert len(colony.organisms) == 48
-    assert counts == Counter({lineage: 4 for lineage in range(12)})
-    assert len({(o.x, o.y) for o in colony.organisms}) == 48
+    assert len(colony.organisms) == 52
+    assert counts == Counter({lineage: 4 for lineage in range(13)})
+    assert len({(o.x, o.y) for o in colony.organisms}) == 52
 
 
 def test_live_habitat_restores_checkpoint(tmp_path):
@@ -519,3 +519,36 @@ def test_biome_boundaries_have_narrow_migration_corridors():
     assert world.move(3, 0, 1, 0) == (3, 0)  # blocked boundary
     assert world.move(3, 2, 1, 0) == (4, 2)  # quarter-map gate
     assert world.move(1, 1, 1, 0) == (2, 1)  # free within a biome
+
+
+def test_death_leaves_decaying_scrap_that_salvage_reclaims():
+    world = World(WorldConfig(width=8, height=8, memory_cap=100, seed=32))
+    colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
+                    seed=32, founders=1)
+    organism = colony.organisms[0]
+    x, y = organism.x, organism.y
+    organism.genome = [Op.NOP] * 20
+    organism.energy = 0.01
+    colony.step()
+    deposited = world.scrap[y][x]
+    assert deposited > 0
+    assert colony.scrap_deposited > 0
+    gained = world.salvage(x, y)
+    assert gained > 0
+    assert world.scrap[y][x] < deposited
+    remaining = world.scrap[y][x]
+    world.step()
+    assert world.scrap[y][x] < remaining
+
+
+def test_salvage_instruction_is_a_costly_contextual_advantage():
+    world = World(WorldConfig(width=8, height=8, memory_cap=100, seed=33))
+    colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
+                    seed=33, founders=1, founder_genomes=[[Op.SALVAGE]])
+    organism = colony.organisms[0]
+    world.scrap[organism.y][organism.x] = 5
+    before = organism.energy
+    colony.step()
+    assert organism.salvaged > 0
+    assert colony.salvaged == organism.salvaged
+    assert organism.energy > before

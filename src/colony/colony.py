@@ -34,6 +34,8 @@ class Colony:
         self.forecast_attempts = 0
         self.forecasts_solved = 0
         self.mutation_mechanisms: Counter = Counter()
+        self.scrap_deposited = 0.0
+        self.salvaged = 0.0
         self.lifecycle_events = deque()
         genomes = founder_genomes or [build_ancestor() for _ in range(founders)]
         if len(genomes) < founders:
@@ -81,6 +83,8 @@ class Colony:
         for organism in self.organisms:
             cause = "starvation" if organism.energy <= 0 else ("senescence" if organism.age >= self.max_age else None)
             if cause:
+                self.scrap_deposited += self.world.deposit_scrap(
+                    organism.x, organism.y, len(organism.genome), organism.energy)
                 self.lifecycle_events.append({"kind": "death", "tick": self.world.tick,
                                               "organism": organism, "cause": cause})
                 organism.free_child(self.world)

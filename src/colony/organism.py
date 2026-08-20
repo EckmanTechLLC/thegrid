@@ -55,6 +55,7 @@ class Organism:
     forecast_attempts: int = 0
     forecasts_solved: int = 0
     experimental_ops: dict[str, int] = field(default_factory=dict)
+    salvaged: float = 0.0
 
     def telemetry(self) -> dict:
         return {
@@ -77,6 +78,7 @@ class Organism:
             "forecast_attempts": getattr(self, "forecast_attempts", 0),
             "forecasts_solved": getattr(self, "forecasts_solved", 0),
             "experimental_ops": dict(getattr(self, "experimental_ops", {})),
+            "salvaged": round(getattr(self, "salvaged", 0.0), 2),
         }
 
     def execute(self, colony) -> None:
@@ -262,6 +264,11 @@ class Organism:
                 self.forecast_stored_mask |= 1 << slot
         elif op == Op.JMPR:
             next_ip = (self.ip + (self.c % 15) - 7) % len(self.genome)
+        elif op == Op.SALVAGE:
+            gained = colony.world.salvage(self.x, self.y)
+            self.energy += gained
+            self.salvaged = getattr(self, "salvaged", 0.0) + gained
+            colony.salvaged += gained
         self.ip = next_ip
 
     def free_child(self, world) -> None:
