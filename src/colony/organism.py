@@ -40,6 +40,15 @@ class Organism:
     scan_pending: bool = False
     awaiting_post_move_harvest: bool = False
     scratch: list[int] = field(default_factory=lambda: [0] * 8)
+    last_load_slot: int | None = None
+    last_load_tick: int = -1
+    forecast_target: int | None = None
+    forecast_due_tick: int = -1
+    forecast_expires_tick: int = -1
+    forecast_stored_mask: int = 0
+    forecast_attempts: int = 0
+    forecasts_solved: int = 0
+    experimental_ops: dict[str, int] = field(default_factory=dict)
 
     def telemetry(self) -> dict:
         return {
@@ -56,6 +65,9 @@ class Organism:
             "guided_moves": getattr(self, "guided_moves", 0),
             "post_move_harvested": round(getattr(self, "post_move_harvested", 0.0), 2),
             "scratch_nonzero": sum(value != 0 for value in getattr(self, "scratch", [])),
+            "forecast_attempts": getattr(self, "forecast_attempts", 0),
+            "forecasts_solved": getattr(self, "forecasts_solved", 0),
+            "experimental_ops": dict(getattr(self, "experimental_ops", {})),
         }
 
     def execute(self, colony) -> None:
@@ -64,6 +76,10 @@ class Organism:
             return
         word = self.genome[self.ip % len(self.genome)]
         op = Op(word) if 0 <= word < NUM_OPS else Op.NOP
+        if op in (Op.ADD, Op.SUB, Op.XOR, Op.LOAD, Op.STORE, Op.JMPR):
+            name = ISA[op].name
+            self.experimental_ops[name] = self.experimental_ops.get(name, 0) + 1
+            colony.experimental_ops[name] += 1
         self.energy -= ISA[op].cost * colony.world.cost_multiplier
         colony.world.charge_instruction()
         self.age += 1
@@ -111,19 +127,52 @@ class Organism:
             self.a, self.b = self.b, self.a
         elif op == Op.INPUT:
             if self.input_index == 0:
-                self.last_inputs = colony.tasks.inputs(colony.world.tick, self.id)
+                # A temporal challenge keeps replaying its cue pair until it is
+                # solved or expires, so a looping genome can recompute and
+                # recover the same forecast instead of being handed a moving
+                # target every circuit.
+                if self.forecast_target is None or colony.world.tick > self.forecast_expires_tick:
+                    self.last_inputs = colony.tasks.inputs(colony.world.tick, self.id)
                 self.task_inputs_seen = 0
             self.a = self.last_inputs[self.input_index % 2]
             self.input_index = (self.input_index + 1) % 2
             self.task_inputs_seen = getattr(self, "task_inputs_seen", 0) + 1
+            if (self.input_index == 0
+                    and hasattr(colony.tasks, "forecast_target")
+                    and (self.forecast_target is None
+                         or colony.world.tick > self.forecast_expires_tick)):
+                self.forecast_target = colony.tasks.forecast_target(self.last_inputs)
+                self.forecast_due_tick = colony.world.tick + colony.tasks.forecast_delay
+                self.forecast_expires_tick = self.forecast_due_tick + colony.tasks.forecast_window
+                self.forecast_stored_mask = 0
         elif op == Op.NAND:
             self.a = (~(self.a & self.b)) & 0xFF
         elif op == Op.OUTPUT:
             # A task challenge is valid only after both fresh inputs have been
             # read, and every challenge can be submitted at most once.
-            if getattr(self, "task_inputs_seen", 0) < 2:
-                name, reward = None, 0.0
-            else:
+            name, reward = None, 0.0
+            tick = colony.world.tick
+            if self.forecast_target is not None and tick >= self.forecast_due_tick:
+                self.forecast_attempts += 1
+                colony.forecast_attempts += 1
+                recovered_after_due = (
+                    self.last_load_tick >= self.forecast_due_tick
+                    and self.last_load_slot is not None
+                    and self.forecast_stored_mask & (1 << self.last_load_slot)
+                    and tick - self.last_load_tick <= max(2, len(self.genome))
+                )
+                if tick <= self.forecast_expires_tick and recovered_after_due:
+                    name, reward = colony.tasks.evaluate_forecast(
+                        self.a, self.forecast_target)
+                if name == "forecast" or tick > self.forecast_expires_tick:
+                    self.forecast_target = None
+                    self.forecast_due_tick = -1
+                    self.forecast_expires_tick = -1
+                    self.forecast_stored_mask = 0
+                if name == "forecast":
+                    self.forecasts_solved += 1
+                    colony.forecasts_solved += 1
+            if name is None and getattr(self, "task_inputs_seen", 0) >= 2:
                 name, reward = colony.tasks.evaluate(self.a, self.last_inputs)
                 self.task_inputs_seen = 0
             if name:
@@ -166,12 +215,20 @@ class Organism:
             self.a = (self.a ^ self.b) & 0xFF
         elif op == Op.LOAD:
             scratch = getattr(self, "scratch", [0] * 8)
-            self.a = scratch[self.b % len(scratch)]
+            slot = self.b % len(scratch)
+            self.a = scratch[slot]
+            self.last_load_slot = slot
+            self.last_load_tick = colony.world.tick
         elif op == Op.STORE:
             scratch = getattr(self, "scratch", None)
             if scratch is None:
                 self.scratch = scratch = [0] * 8
-            scratch[self.b % len(scratch)] = self.a & 0xFF
+            slot = self.b % len(scratch)
+            scratch[slot] = self.a & 0xFF
+            if (self.forecast_target is not None
+                    and colony.world.tick < self.forecast_due_tick
+                    and scratch[slot] == self.forecast_target):
+                self.forecast_stored_mask |= 1 << slot
         elif op == Op.JMPR:
             next_ip = (self.ip + (self.c % 15) - 7) % len(self.genome)
         self.ip = next_ip

@@ -15,6 +15,15 @@ relative jump. Existing instruction numbers are unchanged. The experimental
 service uses blind mutation initially so these capabilities must emerge through
 the substrate rather than authored proposals.
 
+Colony Two also offers a delayed forecast niche. Two `input` values define a
+future modular sum, but `output` pays its 18-energy reward only after 24 ticks
+and only when the answer was stored before the delay and loaded from scratch
+afterward. The 32-tick redemption window permits many loop shapes while making
+arithmetic, memory, and timing potentially adaptive. `/api/state` reports
+cumulative experimental-instruction executions, attempts, solutions, and live
+pending challenges. Colony One does not have this pressure and remains the
+unchanged reference habitat.
+
 The installed colony-two observer listens on LAN port 8788. Its state, history,
 and mutation queue live under `~/.local/state/thegrid-colony2`, wholly separate
 from epoch 1207. Both colony services receive the same bounded allocation: 5%

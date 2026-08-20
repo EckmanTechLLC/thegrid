@@ -6,6 +6,7 @@ from src.colony.live import Habitat
 from src.colony.odin_operator import OdinMutator
 from src.colony.organism import Organism
 from src.colony.history import LineageHistory
+from src.colony.tasks import TemporalTaskEnvironment
 import json
 import random
 from types import SimpleNamespace
@@ -265,3 +266,64 @@ def test_experimental_relative_jump_uses_register_c():
     organism.ip, organism.c = 0, 9
     organism.execute(colony)
     assert organism.ip == 2
+
+
+def test_temporal_forecast_requires_delayed_scratch_recall():
+    world = World(WorldConfig(width=4, height=4, memory_cap=100, seed=15))
+    tasks = TemporalTaskEnvironment(forecast_delay=8, forecast_window=8,
+                                    forecast_reward=18.0)
+    colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
+                    tasks=tasks, seed=15, founders=1)
+    organism = colony.organisms[0]
+
+    organism.genome = [Op.INPUT]
+    organism.execute(colony)
+    organism.genome = [Op.SWAP]
+    organism.execute(colony)
+    organism.genome = [Op.INPUT]
+    organism.execute(colony)
+    organism.genome = [Op.ADD]
+    organism.execute(colony)
+    target = organism.a
+    organism.genome = [Op.STORE]
+    organism.execute(colony)
+
+    # A correct answer is deliberately worthless before the environmental delay.
+    organism.genome = [Op.OUTPUT]
+    before = organism.energy
+    organism.execute(colony)
+    assert organism.forecasts_solved == 0
+    assert organism.energy < before
+
+    world.tick = organism.forecast_due_tick
+    organism.genome = [Op.LOAD]
+    organism.execute(colony)
+    assert organism.a == target
+    organism.genome = [Op.OUTPUT]
+    before = organism.energy
+    organism.execute(colony)
+    assert organism.energy > before
+    assert organism.forecasts_solved == 1
+    assert colony.forecasts_solved == 1
+    assert organism.tasks_solved["forecast"] == 1
+    assert colony.experimental_ops["add"] == 1
+    assert colony.experimental_ops["store"] == 1
+    assert colony.experimental_ops["load"] == 1
+
+
+def test_temporal_forecast_is_reachable_by_a_looping_replicator():
+    world = World(WorldConfig(width=8, height=8, tile_regen=0.5,
+                              memory_cap=500, seed=16))
+    colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
+                    tasks=TemporalTaskEnvironment(), seed=16, founders=1)
+    organism = colony.organisms[0]
+    organism.energy = 200
+    organism.genome = [
+        Op.HARVEST, Op.INPUT, Op.SWAP, Op.INPUT, Op.ADD, Op.STORE,
+        Op.LOAD, Op.OUTPUT, Op.ALLOC, Op.COPY, Op.IFNOTDONE, Op.JMPB, Op.FORK,
+    ]
+    world.memory_used = len(organism.genome)
+    for _ in range(100):
+        colony.step()
+    assert colony.forecasts_solved > 0
+    assert colony.births > 0

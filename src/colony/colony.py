@@ -28,6 +28,9 @@ class Colony:
         self.task_firsts: dict[str, int] = {}
         self.neighbor_reads = 0
         self.foreign_copies = 0
+        self.experimental_ops: Counter = Counter()
+        self.forecast_attempts = 0
+        self.forecasts_solved = 0
         self.lifecycle_events = deque()
         ancestor = build_ancestor()
         for lineage in range(founders):

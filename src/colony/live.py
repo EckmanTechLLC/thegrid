@@ -22,7 +22,7 @@ from .history import LineageHistory, genome_id
 from .isa import ISA, build_ancestor
 from .odin_operator import OdinMutator
 from .record import ALPHABET, encode_energy, encode_genome, encode_positions
-from .tasks import TaskEnvironment
+from .tasks import TemporalTaskEnvironment
 from .substrate import SubstrateWorld
 from .world import WorldConfig
 
@@ -63,7 +63,7 @@ class Habitat:
             from .world import World
             world = World(WorldConfig(seed=self.seed))
             mutator = RandomMutator()
-        return Colony(world, mutator, TaskEnvironment(),
+        return Colony(world, mutator, TemporalTaskEnvironment(),
                       seed=self.seed, founders=self.founders)
 
     def _load_or_create(self) -> Colony:
@@ -89,6 +89,10 @@ class Habitat:
                             [[0] * config.width for _ in range(config.height)])
             colony.neighbor_reads = getattr(colony, "neighbor_reads", 0)
             colony.foreign_copies = getattr(colony, "foreign_copies", 0)
+            colony.experimental_ops = getattr(colony, "experimental_ops", Counter())
+            colony.forecast_attempts = getattr(colony, "forecast_attempts", 0)
+            colony.forecasts_solved = getattr(colony, "forecasts_solved", 0)
+            colony.tasks = TemporalTaskEnvironment()
             colony.lifecycle_events = getattr(colony, "lifecycle_events", deque())
             for organism in colony.organisms:
                 for name in ("signals_sent", "structures_built", "neighbor_reads", "foreign_copies",
@@ -101,6 +105,20 @@ class Habitat:
                         setattr(organism, name, False)
                 if not hasattr(organism, "scratch"):
                     organism.scratch = [0] * 8
+                defaults = {
+                    "last_load_slot": None,
+                    "last_load_tick": -1,
+                    "forecast_target": None,
+                    "forecast_due_tick": -1,
+                    "forecast_expires_tick": -1,
+                    "forecast_stored_mask": 0,
+                    "forecast_attempts": 0,
+                    "forecasts_solved": 0,
+                    "experimental_ops": {},
+                }
+                for name, value in defaults.items():
+                    if not hasattr(organism, name):
+                        setattr(organism, name, value)
             return colony
         except FileNotFoundError:
             return self._new_colony()
@@ -219,6 +237,10 @@ class Habitat:
                                       for row in world.structures for value in row),
             "neighborReads": colony.neighbor_reads,
             "foreignCopies": colony.foreign_copies,
+            "experimentalOps": dict(colony.experimental_ops),
+            "forecastAttempts": colony.forecast_attempts,
+            "forecastsSolved": colony.forecasts_solved,
+            "activeForecasts": sum(o.forecast_target is not None for o in colony.organisms),
             "moves": sum(getattr(o, "moves", 0) for o in colony.organisms),
             "scans": sum(getattr(o, "scans", 0) for o in colony.organisms),
             "guidedMoves": sum(getattr(o, "guided_moves", 0) for o in colony.organisms),
@@ -257,6 +279,14 @@ class Habitat:
             "neighborReads": getattr(organism, "neighbor_reads", 0),
             "foreignCopies": getattr(organism, "foreign_copies", 0),
             "scratch": list(getattr(organism, "scratch", [])) or None,
+            "experimentalOps": dict(getattr(organism, "experimental_ops", {})),
+            "forecast": {
+                "target": getattr(organism, "forecast_target", None),
+                "dueTick": getattr(organism, "forecast_due_tick", -1),
+                "expiresTick": getattr(organism, "forecast_expires_tick", -1),
+                "attempts": getattr(organism, "forecast_attempts", 0),
+                "solved": getattr(organism, "forecasts_solved", 0),
+            },
         }
 
 
