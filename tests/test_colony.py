@@ -10,6 +10,7 @@ from src.colony.history import LineageHistory
 from src.colony.tasks import TemporalTaskEnvironment
 import json
 import random
+from collections import Counter
 from types import SimpleNamespace
 
 
@@ -71,6 +72,16 @@ def test_diverse_epoch_seeds_every_lineage_on_a_rich_distinct_patch():
     assert all(world.tile_energy(o.x, o.y) == world.config.tile_capacity
                for o in colony.organisms)
     assert all(o.energy == 48.0 for o in colony.organisms)
+
+
+def test_epoch_can_inoculate_four_organisms_per_lineage():
+    colony = Colony(World(WorldConfig(width=48, height=48, seed=42)),
+                    seed=42, founders=12,
+                    founder_genomes=build_founder_palette(), founder_copies=4)
+    counts = Counter(o.lineage for o in colony.organisms)
+    assert len(colony.organisms) == 48
+    assert counts == Counter({lineage: 4 for lineage in range(12)})
+    assert len({(o.x, o.y) for o in colony.organisms}) == 48
 
 
 def test_live_habitat_restores_checkpoint(tmp_path):

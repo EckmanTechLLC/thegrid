@@ -71,7 +71,8 @@ class Habitat:
             mutator = RandomMutator()
         return Colony(world, mutator, TemporalTaskEnvironment(),
                       seed=self.seed, founders=self.founders,
-                      founder_genomes=build_founder_palette())
+                      founder_genomes=build_founder_palette(),
+                      founder_copies=4 if self.physical else 1)
 
     def _load_or_create(self) -> Colony:
         try:

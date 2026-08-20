@@ -15,7 +15,8 @@ from .world import World
 class Colony:
     def __init__(self, world: World | None = None, mutator=None, tasks=None,
                  seed: int = 42, founders: int = 6, max_age: int = 2400,
-                 founder_genomes: list[list[int]] | None = None):
+                 founder_genomes: list[list[int]] | None = None,
+                 founder_copies: int = 1):
         self.world = world or World()
         self.mutator = mutator or RandomMutator()
         self.tasks = tasks or TaskEnvironment()
@@ -43,20 +44,25 @@ class Colony:
                      for x in range(self.world.config.width)]
         self.rng.shuffle(positions)
         positions.sort(key=lambda p: self.world.tile_energy(*p), reverse=True)
+        if founder_copies < 1:
+            raise ValueError("founder_copies must be positive")
+        position_index = 0
         for lineage in range(founders):
             genome = list(genomes[lineage])
             if not genome:
                 raise ValueError("founder genomes cannot be empty")
-            if not self.world.request_memory(len(genome)):
-                break
-            founder = Organism(
-                id=self._id(), genome=genome,
-                x=positions[lineage][0], y=positions[lineage][1], lineage=lineage,
-                energy=48.0,
-            )
-            self.organisms.append(founder)
-            self.lifecycle_events.append({"kind": "birth", "tick": self.world.tick,
-                                          "organism": founder, "parent": None})
+            for _ in range(founder_copies):
+                if not self.world.request_memory(len(genome)):
+                    return
+                x, y = positions[position_index]
+                position_index += 1
+                founder = Organism(
+                    id=self._id(), genome=list(genome), x=x, y=y,
+                    lineage=lineage, energy=48.0,
+                )
+                self.organisms.append(founder)
+                self.lifecycle_events.append({"kind": "birth", "tick": self.world.tick,
+                                              "organism": founder, "parent": None})
 
     def _id(self) -> int:
         value = self.next_id
