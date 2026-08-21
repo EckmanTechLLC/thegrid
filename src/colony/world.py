@@ -42,6 +42,7 @@ class WorldConfig:
     heat_penalty: float = 0.04       # cost multiplier added per degree over
     storm_interval: int = 1000       # Colony Two resource-weather cadence
     storm_warning: int = 100         # input cue lead time
+    storm_scout_depth: int = 4       # bloom-side boundary strip that senses it
     drought_fraction: float = 0.08   # energy retained in the drought quadrant
     bloom_fraction: float = 0.75     # minimum capacity after a bloom
     signal_radius: int = 3
@@ -238,6 +239,34 @@ class World:
         cycle = (self.tick if tick is None else tick) // interval
         drought = cycle % 4
         return drought, (drought + 2) % 4
+
+    def weather_cue(self, x: int, y: int) -> int | None:
+        """Give bloom-front scouts a direction; everyone else must listen."""
+        c = self.config
+        interval = getattr(c, "storm_interval", 1000)
+        warning = getattr(c, "storm_warning", 100)
+        if not interval or self.tick % interval < interval - warning:
+            return None
+        next_tick = ((self.tick // interval) + 1) * interval
+        _, bloom = self.storm_regions(next_tick)
+        x, y = self.wrap(x, y)
+        if self.biome(x, y) != bloom:
+            return None
+        mid_x, mid_y = c.width // 2, c.height // 2
+        depth = max(1, getattr(c, "storm_scout_depth", 4))
+        near_vertical_front = (bloom % 2 == 0 and mid_x - depth <= x < mid_x) or (
+            bloom % 2 == 1 and mid_x <= x < mid_x + depth)
+        near_horizontal_front = (bloom < 2 and mid_y - depth <= y < mid_y) or (
+            bloom >= 2 and mid_y <= y < mid_y + depth)
+        if not (near_vertical_front or near_horizontal_front):
+            return None
+
+        target_x = c.width // 4 if bloom % 2 == 0 else 3 * c.width // 4
+        target_y = c.height // 4 if bloom < 2 else 3 * c.height // 4
+        dx, dy = target_x - x, target_y - y
+        if abs(dx) >= abs(dy) and dx:
+            return 1 if dx > 0 else 3
+        return 2 if dy > 0 else 0
 
     def apply_resource_storm(self) -> bool:
         """Apply Colony Two's periodic spatial drought/bloom disturbance."""

@@ -493,12 +493,50 @@ def test_resource_storm_drains_one_quadrant_and_blooms_the_opposite():
     assert world.energy[0][0] == 50.0
 
 
-def test_storm_warning_replaces_inputs_only_during_warning_window():
+def test_storm_warning_is_local_and_directional():
     tasks = TemporalTaskEnvironment(storm_interval=1000, storm_warning=100)
-    assert tasks.inputs(899, 7) != (1, 3)
-    assert tasks.inputs(900, 7) == (1, 3)
-    assert tasks.inputs(999, 7) == (1, 3)
-    assert tasks.inputs(1000, 7) != (2, 0)
+    world = World(WorldConfig(width=48, height=48, storm_interval=1000,
+                              storm_warning=100, storm_scout_depth=4))
+    world.tick = 899
+    assert world.weather_cue(24, 24) is None
+    world.tick = 900  # next bloom is SE; only its inward boundary can sense it
+    assert world.weather_cue(24, 24) in (1, 2)
+    assert world.weather_cue(40, 40) is None
+    assert world.weather_cue(23, 24) is None
+    cue = world.weather_cue(24, 24)
+    assert tasks.inputs(900, 7, weather_cue=cue) == (cue, cue)
+    assert tasks.inputs(900, 7) != (cue, cue)
+    world.tick = 1000
+    assert world.weather_cue(24, 24) is None
+
+
+def test_local_weather_cue_can_flow_through_signal_listen_move():
+    world = World(WorldConfig(width=48, height=48, storm_interval=1000,
+                              storm_warning=100, storm_scout_depth=4))
+    tasks = TemporalTaskEnvironment(storm_interval=1000, storm_warning=100)
+    colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
+                    tasks=tasks, seed=41, founders=2)
+    scout, listener = colony.organisms
+    world.tick = 900
+    scout.x, scout.y = 24, 24
+    listener.x, listener.y = 27, 24
+    scout.genome = [Op.INPUT, Op.SIGNAL]
+    listener.genome = [Op.LISTEN, Op.MOVE, Op.HARVEST]
+
+    scout.execute(colony)
+    cue = scout.a
+    before_signal = scout.energy
+    scout.execute(colony)
+    assert scout.weather_cues_seen == 1
+    assert scout.weather_cue_signals == 1
+    assert scout.energy < before_signal  # signaling itself has no reward
+
+    listener.execute(colony)
+    assert listener.a == cue
+    listener.execute(colony)
+    assert listener.signal_guided_moves == 1
+    listener.execute(colony)
+    assert listener.post_signal_harvested > 0
 
 
 def test_biomes_create_real_instruction_and_resource_tradeoffs():

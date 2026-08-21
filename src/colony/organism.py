@@ -54,6 +54,9 @@ class Organism:
     forecast_stored_mask: int = 0
     forecast_attempts: int = 0
     forecasts_solved: int = 0
+    weather_cues_seen: int = 0
+    weather_cue_signals: int = 0
+    weather_cue_value: int | None = None
     experimental_ops: dict[str, int] = field(default_factory=dict)
     salvaged: float = 0.0
 
@@ -77,6 +80,8 @@ class Organism:
             "scratch_nonzero": sum(value != 0 for value in getattr(self, "scratch", [])),
             "forecast_attempts": getattr(self, "forecast_attempts", 0),
             "forecasts_solved": getattr(self, "forecasts_solved", 0),
+            "weather_cues_seen": getattr(self, "weather_cues_seen", 0),
+            "weather_cue_signals": getattr(self, "weather_cue_signals", 0),
             "experimental_ops": dict(getattr(self, "experimental_ops", {})),
             "salvaged": round(getattr(self, "salvaged", 0.0), 2),
         }
@@ -156,7 +161,13 @@ class Organism:
                 # recover the same forecast instead of being handed a moving
                 # target every circuit.
                 if self.forecast_target is None or colony.world.tick > self.forecast_expires_tick:
-                    self.last_inputs = colony.tasks.inputs(colony.world.tick, self.id)
+                    cue = colony.world.weather_cue(self.x, self.y)
+                    self.last_inputs = colony.tasks.inputs(
+                        colony.world.tick, self.id, weather_cue=cue)
+                    self.weather_cue_value = cue
+                    if cue is not None:
+                        self.weather_cues_seen = getattr(self, "weather_cues_seen", 0) + 1
+                        colony.weather_cues_seen += 1
                 self.task_inputs_seen = 0
             self.a = self.last_inputs[self.input_index % 2]
             self.input_index = (self.input_index + 1) % 2
@@ -210,6 +221,10 @@ class Organism:
         elif op == Op.SIGNAL:
             colony.world.signal(self.x, self.y, self.a)
             self.signals_sent = getattr(self, "signals_sent", 0) + 1
+            if (getattr(self, "weather_cue_value", None) is not None
+                    and self.a == self.weather_cue_value):
+                self.weather_cue_signals = getattr(self, "weather_cue_signals", 0) + 1
+                colony.weather_cue_signals += 1
         elif op == Op.LISTEN:
             strength = colony.world.listen_strength(self.x, self.y)
             self.a = colony.world.listen(self.x, self.y)

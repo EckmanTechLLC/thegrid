@@ -33,6 +33,8 @@ class Colony:
         self.experimental_ops: Counter = Counter()
         self.forecast_attempts = 0
         self.forecasts_solved = 0
+        self.weather_cues_seen = 0
+        self.weather_cue_signals = 0
         self.mutation_mechanisms: Counter = Counter()
         self.scrap_deposited = 0.0
         self.salvaged = 0.0

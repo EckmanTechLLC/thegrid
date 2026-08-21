@@ -13,7 +13,8 @@ class TaskEnvironment:
         "orn": 7.0, "xor": 9.0,
     })
 
-    def inputs(self, tick: int, organism_id: int) -> tuple[int, int]:
+    def inputs(self, tick: int, organism_id: int,
+               weather_cue: int | None = None) -> tuple[int, int]:
         a = (tick * 73 + organism_id * 29 + 17) & MASK
         b = (tick * 31 + organism_id * 47 + 91) & MASK
         return a, b
@@ -51,12 +52,14 @@ class TemporalTaskEnvironment(TaskEnvironment):
     storm_interval: int = 1000
     storm_warning: int = 100
 
-    def inputs(self, tick: int, organism_id: int) -> tuple[int, int]:
-        phase = tick % self.storm_interval
-        if phase >= self.storm_interval - self.storm_warning:
-            upcoming_cycle = tick // self.storm_interval + 1
-            drought = upcoming_cycle % 4
-            return drought, (drought + 2) % 4
+    def inputs(self, tick: int, organism_id: int,
+               weather_cue: int | None = None) -> tuple[int, int]:
+        # Weather is not globally broadcast. A world-local scout may receive a
+        # movement direction toward the coming bloom; everyone else sees the
+        # ordinary computational challenge. Repeating the direction makes a
+        # single INPUT -> SIGNAL mutation useful without prescribing it.
+        if weather_cue is not None:
+            return weather_cue, weather_cue
         return super().inputs(tick, organism_id)
 
     def forecast_target(self, inputs: tuple[int, int]) -> int:

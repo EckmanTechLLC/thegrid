@@ -112,6 +112,8 @@ class Habitat:
             colony.experimental_ops = getattr(colony, "experimental_ops", Counter())
             colony.forecast_attempts = getattr(colony, "forecast_attempts", 0)
             colony.forecasts_solved = getattr(colony, "forecasts_solved", 0)
+            colony.weather_cues_seen = getattr(colony, "weather_cues_seen", 0)
+            colony.weather_cue_signals = getattr(colony, "weather_cue_signals", 0)
             colony.mutation_mechanisms = getattr(colony, "mutation_mechanisms", Counter())
             colony.scrap_deposited = getattr(colony, "scrap_deposited", 0.0)
             colony.salvaged = getattr(colony, "salvaged", 0.0)
@@ -121,7 +123,8 @@ class Habitat:
                 for name in ("signals_sent", "structures_built", "neighbor_reads", "foreign_copies",
                              "moves", "scans", "guided_moves", "post_move_harvested",
                              "task_inputs_seen", "signals_heard", "signal_guided_moves",
-                             "post_signal_harvested"):
+                             "post_signal_harvested", "weather_cues_seen",
+                             "weather_cue_signals"):
                     if not hasattr(organism, name):
                         setattr(organism, name, 0)
                 for name in ("scan_pending", "listen_pending", "awaiting_post_move_harvest",
@@ -143,6 +146,7 @@ class Habitat:
                     "forecast_stored_mask": 0,
                     "forecast_attempts": 0,
                     "forecasts_solved": 0,
+                    "weather_cue_value": None,
                     "experimental_ops": {},
                 }
                 for name, value in defaults.items():
@@ -322,6 +326,8 @@ class Habitat:
                                        for o in colony.organisms),
             "postSignalHarvested": round(sum(getattr(o, "post_signal_harvested", 0.0)
                                                for o in colony.organisms), 2),
+            "weatherCuesSeen": colony.weather_cues_seen,
+            "weatherCueSignals": colony.weather_cue_signals,
             "builtTiles": built_tiles,
             "signalField": "".join("0123456789abc"[min(12, value)]
                                    for row in world.signal_strength for value in row),
@@ -377,6 +383,8 @@ class Habitat:
             "signalsHeard": getattr(organism, "signals_heard", 0),
             "signalGuidedMoves": getattr(organism, "signal_guided_moves", 0),
             "postSignalHarvested": round(getattr(organism, "post_signal_harvested", 0.0), 2),
+            "weatherCuesSeen": getattr(organism, "weather_cues_seen", 0),
+            "weatherCueSignals": getattr(organism, "weather_cue_signals", 0),
             "structures": getattr(organism, "structures_built", 0),
             "salvaged": round(getattr(organism, "salvaged", 0.0), 2),
             "scrapHere": round(self.colony.world.scrap[organism.y][organism.x], 2),
