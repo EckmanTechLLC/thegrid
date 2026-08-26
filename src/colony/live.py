@@ -117,9 +117,24 @@ class Habitat:
             colony.mutation_mechanisms = getattr(colony, "mutation_mechanisms", Counter())
             colony.scrap_deposited = getattr(colony, "scrap_deposited", 0.0)
             colony.salvaged = getattr(colony, "salvaged", 0.0)
+            # backfill code-commons state onto worlds pickled before it existed
+            if not hasattr(colony.world, "code_slots"):
+                colony.world.code_slots = [[] for _ in range(16)]
+                colony.world.slot_uses = [0] * 16
+            if not hasattr(colony.world, "slot_owner"):
+                colony.world.slot_owner = [-1] * 16
+            for _c in ("published", "calls", "self_writes", "royalty_events"):
+                if not hasattr(colony, _c):
+                    setattr(colony, _c, 0)
+            if not hasattr(colony, "royalties"):
+                colony.royalties = 0.0
             colony.tasks = TemporalTaskEnvironment()
             colony.lifecycle_events = getattr(colony, "lifecycle_events", deque())
             for organism in colony.organisms:
+                if not hasattr(organism, "pending"):
+                    organism.pending = []
+                if not hasattr(organism, "call_slot"):
+                    organism.call_slot, organism.call_energy = -1, 0.0
                 for name in ("signals_sent", "structures_built", "neighbor_reads", "foreign_copies",
                              "moves", "scans", "guided_moves", "post_move_harvested",
                              "task_inputs_seen", "signals_heard", "signal_guided_moves",
@@ -339,6 +354,14 @@ class Habitat:
             "scrapAvailable": round(sum(sum(row) for row in world.scrap), 2),
             "scrapDeposited": round(colony.scrap_deposited, 2),
             "salvaged": round(colony.salvaged, 2),
+            "published": getattr(colony, "published", 0),
+            "calls": getattr(colony, "calls", 0),
+            "selfWrites": getattr(colony, "self_writes", 0),
+            "royalties": round(getattr(colony, "royalties", 0.0), 2),
+            "royaltyEvents": getattr(colony, "royalty_events", 0),
+            "slotOwners": list(getattr(colony.world, "slot_owner", [])),
+            "codeSlotsUsed": sum(1 for r in colony.world.code_slots if r),
+            "slotUses": list(colony.world.slot_uses),
             "neighborReads": colony.neighbor_reads,
             "foreignCopies": colony.foreign_copies,
             "experimentalOps": dict(colony.experimental_ops),
@@ -482,9 +505,17 @@ async def create_app(habitat: Habitat, ticks_per_second: int) -> web.Application
 
     app.router.add_get("/api/organisms", tile_organisms)
     app.router.add_get("/api/organism/{epoch:\\d+}/{organism_id:\\d+}", organism_detail)
-    app.router.add_get("/api/history", lambda _: web.json_response(
-        habitat.history.summary(habitat.epoch),
-        dumps=lambda x: json.dumps(x, separators=(",", ":"))))
+
+    async def history_summary(request: web.Request) -> web.Response:
+        # The aggregate queries grow with the fossil record. Keep them off the
+        # aiohttp event loop so history refreshes cannot pause the live stream.
+        summary = await asyncio.to_thread(habitat.history.summary, habitat.epoch)
+        return web.json_response(
+            summary,
+            dumps=lambda x: json.dumps(x, separators=(",", ":")),
+        )
+
+    app.router.add_get("/api/history", history_summary)
 
     async def start(app: web.Application) -> None:
         app["runner"] = asyncio.create_task(run_habitat(habitat, ticks_per_second))

@@ -35,6 +35,9 @@ class Op(IntEnum):
     STORE = 27
     JMPR = 28
     SALVAGE = 29
+    PUBLISH = 30
+    CALL = 31
+    WRITE = 32
 
 
 @dataclass(frozen=True)
@@ -45,7 +48,11 @@ class Instruction:
 
 
 ISA = [
-    Instruction("nop", 0.15, "do nothing"),
+    # nop is FREE: neutral drift space. Carrying material that is not useful YET
+    # must be survivable or chance has nowhere to accumulate and duplications get
+    # stripped before they can diverge. Bloat stays braked by replication cost
+    # (every word costs 0.55 to copy), so genomes cannot pad without limit.
+    Instruction("nop", 0.0, "do nothing"),
     Instruction("harvest", 0.35, "draw energy from the current tile"),
     Instruction("scan", 0.45, "sense the richest neighbouring direction into A"),
     Instruction("move", 0.70, "move in direction A mod 4"),
@@ -75,6 +82,15 @@ ISA = [
     Instruction("store", 0.45, "store A in scratch byte B modulo 8"),
     Instruction("jmpr", 0.30, "jump relative by C modulo 15 minus 7"),
     Instruction("salvage", 0.55, "reclaim decaying scrap from the current tile"),
+    # ── computer-system laws biology does not have ────────────────────────
+    # publish/call: code is REFERENCED, not copied. A routine costs one word in
+    # the genome no matter how long it is, so complexity stops being re-paid on
+    # every replication. There is no linker in biology; there is one here.
+    Instruction("publish", 1.20, "publish 8 words of own genome into shared code slot A"),
+    Instruction("call", 0.25, "splice the routine in shared code slot A into execution"),
+    # write: self-modification during life. Because COPY reads from the genome,
+    # acquired edits are inherited — Lamarckian, impossible biologically.
+    Instruction("write", 0.50, "write A into own genome at position B"),
 ]
 
 NUM_OPS = len(ISA)
@@ -94,6 +110,10 @@ def build_founder_palette() -> list[list[int]]:
     core = build_ancestor()
     return [
         core,
+        # two founders seeding the computer-system capabilities, in the same
+        # style as the others: ingredients appended, not a working arrangement.
+        [*core, Op.PUBLISH, Op.CALL],
+        [*core, Op.WRITE],
         [Op.HARVEST, *core],
         [*core, Op.SCAN, Op.MOVE, Op.HARVEST],
         [*core, Op.BUILD],

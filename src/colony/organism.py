@@ -41,6 +41,9 @@ class Organism:
     guided_moves: int = 0
     post_move_harvested: float = 0.0
     task_inputs_seen: int = 0
+    pending: list[int] = field(default_factory=list)  # spliced routine ops
+    call_slot: int = -1              # slot currently being executed
+    call_energy: float = 0.0         # caller energy when the routine started
     scan_pending: bool = False
     listen_pending: bool = False
     awaiting_post_move_harvest: bool = False
@@ -90,7 +93,14 @@ class Organism:
         if not self.genome:
             self.energy = 0
             return
-        word = self.genome[self.ip % len(self.genome)]
+        # A called routine's instructions execute inline without occupying the
+        # genome — that is the whole point: reference, don't copy.
+        if self.pending:
+            word = self.pending.pop(0)
+            from_routine = True
+        else:
+            word = self.genome[self.ip % len(self.genome)]
+            from_routine = False
         op = Op(word) if 0 <= word < NUM_OPS else Op.NOP
         if op in (Op.ADD, Op.SUB, Op.XOR, Op.LOAD, Op.STORE, Op.JMPR):
             name = ISA[op].name
@@ -100,7 +110,7 @@ class Organism:
             op, self.x, self.y)
         colony.world.charge_instruction()
         self.age += 1
-        next_ip = (self.ip + 1) % len(self.genome)
+        next_ip = self.ip if from_routine else (self.ip + 1) % len(self.genome)
 
         if op == Op.HARVEST:
             gained = colony.world.harvest(self.x, self.y)
@@ -245,16 +255,31 @@ class Organism:
                 self.neighbor_reads = getattr(self, "neighbor_reads", 0) + 1
                 colony.neighbor_reads += 1
         elif op == Op.COPYN and self.child is not None and self.copy_index < len(self.genome):
+            # Horizontal transfer of a contiguous SEGMENT, not a single word.
+            # Single-word transfer is functionally inert: acquiring a neighbour's
+            # capability (e.g. an input/nand/output block) would need several
+            # consecutive COPYN hits at exactly the right indices. Biology moves
+            # functional units — a whole gene arrives in one event — which is why
+            # HGT is an evolutionary force at all. Segment length is small and
+            # random so this is transfer, not wholesale genome theft. Nothing here
+            # chooses WHAT is copied or rewards any outcome; it only makes the
+            # combination of separately-evolved capabilities physically possible.
             other = colony.neighbor(self)
             if other and other.genome:
-                word = other.genome[self.copy_index % len(other.genome)]
-                copied = colony.mutator.copy_error(word, colony.rng)
-                self.child.append(copied)
-                if copied != word:
-                    self.child_mutations.append("point_substitution")
-                self.copy_index += 1
-                self.foreign_copies = getattr(self, "foreign_copies", 0) + 1
-                colony.foreign_copies += 1
+                span = colony.rng.randint(2, 6)
+                start = self.copy_index % len(other.genome)
+                for offset in range(span):
+                    if self.copy_index >= len(self.genome):
+                        break
+                    word = other.genome[(start + offset) % len(other.genome)]
+                    copied = colony.mutator.copy_error(word, colony.rng)
+                    self.child.append(copied)
+                    if copied != word:
+                        self.child_mutations.append("point_substitution")
+                    self.copy_index += 1
+                    self.foreign_copies = getattr(self, "foreign_copies", 0) + 1
+                    colony.foreign_copies += 1
+                self.child_mutations.append("segment_transfer")
         elif op == Op.ADD:
             self.a = (self.a + self.b) & 0xFF
         elif op == Op.SUB:
@@ -284,6 +309,48 @@ class Organism:
             self.energy += gained
             self.salvaged = getattr(self, "salvaged", 0.0) + gained
             colony.salvaged += gained
+        elif op == Op.PUBLISH:
+            if self.genome and self.energy > 3.0:
+                start = self.b % len(self.genome)
+                seg = [self.genome[(start + k) % len(self.genome)] for k in range(8)]
+                colony.world.publish_routine(self.a, seg, owner=self.id)
+                self.published = getattr(self, "published", 0) + 1
+                colony.published = getattr(colony, "published", 0) + 1
+        elif op == Op.CALL:
+            routine = colony.world.get_routine(self.a)
+            # depth guard: a routine that calls itself cannot run away
+            if routine and len(self.pending) < 24:
+                if self.call_slot < 0:
+                    self.call_slot = self.a % len(colony.world.code_slots)
+                    self.call_energy = self.energy
+                self.pending.extend(routine)
+                self.calls = getattr(self, "calls", 0) + 1
+                colony.calls = getattr(colony, "calls", 0) + 1
+        elif op == Op.WRITE:
+            if self.genome:
+                pos = self.b % len(self.genome)
+                self.genome[pos] = self.a % NUM_OPS
+                self.self_writes = getattr(self, "self_writes", 0) + 1
+                colony.self_writes = getattr(colony, "self_writes", 0) + 1
+        # ── royalty settlement ────────────────────────────────────────────
+        # A routine is USEFUL if running it left the caller better off. The
+        # publisher takes a cut OF THAT GAIN — a transfer, never newly minted —
+        # so the commons cannot inflate the way the task faucet did. Useless
+        # code earns its author nothing, and you cannot farm your own routine.
+        if from_routine and not self.pending and self.call_slot >= 0:
+            gain = self.energy - self.call_energy
+            if gain > 0:
+                owner_id = colony.world.slot_owner[self.call_slot]
+                if owner_id >= 0 and owner_id != self.id:
+                    owner = colony.organism_by_id(owner_id)
+                    if owner is not None:
+                        cut = gain * 0.15
+                        self.energy -= cut
+                        owner.energy += cut
+                        owner.royalties = getattr(owner, "royalties", 0.0) + cut
+                        colony.royalties = getattr(colony, "royalties", 0.0) + cut
+                        colony.royalty_events = getattr(colony, "royalty_events", 0) + 1
+            self.call_slot = -1
         self.ip = next_ip
 
     def free_child(self, world) -> None:

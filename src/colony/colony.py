@@ -38,6 +38,11 @@ class Colony:
         self.mutation_mechanisms: Counter = Counter()
         self.scrap_deposited = 0.0
         self.salvaged = 0.0
+        self.published = 0      # routines written to the shared code commons
+        self.calls = 0          # routine invocations (referenced, not copied)
+        self.self_writes = 0    # in-life genome edits (Lamarckian: COPY reads genome)
+        self.royalties = 0.0    # energy transferred to publishers of useful routines
+        self.royalty_events = 0
         self.lifecycle_events = deque()
         genomes = founder_genomes or [build_ancestor() for _ in range(founders)]
         if len(genomes) < founders:
@@ -74,6 +79,8 @@ class Colony:
         return value
 
     def step(self) -> None:
+        # Unworked tasks drift back up in price each tick (scarcity pricing).
+        self.tasks.decay_rates()
         # Rotate the first execution slot so birth order does not permanently
         # decide who harvests a contested tile first. Unlike shuffling, this
         # does not consume the evolutionary RNG stream.
@@ -130,6 +137,12 @@ class Colony:
         self.lifecycle_events.append({"kind": "birth", "tick": self.world.tick,
                                       "organism": child, "parent": parent,
                                       "mutations": mutation_events})
+
+    def organism_by_id(self, oid: int):
+        for organism in self.organisms:
+            if organism.id == oid:
+                return organism
+        return None
 
     def note_task(self, name: str) -> None:
         self.task_firsts.setdefault(name, self.world.tick)

@@ -67,6 +67,10 @@ class World:
         self.signal_strength = [[0] * c.width for _ in range(c.height)]
         self.structures = [[0] * c.width for _ in range(c.height)]
         self.scrap = [[0.0] * c.width for _ in range(c.height)]
+        # shared code commons: routines any organism may publish to or call
+        self.code_slots: list[list[int]] = [[] for _ in range(16)]
+        self.slot_uses: list[int] = [0] * 16
+        self.slot_owner: list[int] = [-1] * 16
 
         self.memory_used: int = 0
         self.heat: float = 0.0
@@ -152,6 +156,18 @@ class World:
 
     def task_reward_multiplier(self, x: int, y: int) -> float:
         return 1.75 if self.biome(x, y) == 3 else 0.75
+
+    # ── shared code commons ───────────────────────────────────────────────
+    def publish_routine(self, slot: int, words: list[int], owner: int = -1) -> None:
+        slot %= len(self.code_slots)
+        self.code_slots[slot] = list(words[:8])
+        self.slot_uses[slot] = 0
+        self.slot_owner[slot] = owner
+
+    def get_routine(self, slot: int) -> list[int]:
+        slot %= len(self.code_slots)
+        self.slot_uses[slot] += 1
+        return self.code_slots[slot]
 
     def signal(self, x: int, y: int, value: int) -> None:
         radius = getattr(self.config, "signal_radius", 3)
