@@ -291,6 +291,11 @@ class World:
         if not interval or not self.tick or self.tick % interval:
             return False
         drought, bloom = self.storm_regions()
+        return self._apply_storm(drought, bloom)
+
+    def _apply_storm(self, drought: int, bloom: int) -> bool:
+        """Burn one quadrant, flood the opposite one, and record the event."""
+        c = self.config
         drought_fraction = getattr(c, "drought_fraction", 0.08)
         bloom_floor = c.tile_capacity * getattr(c, "bloom_fraction", 0.75)
         for y, row in enumerate(self.energy):

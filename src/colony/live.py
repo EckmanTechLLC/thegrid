@@ -326,7 +326,7 @@ class Habitat:
             "isa": [item.name for item in ISA],
             "ancestor": encode_genome(build_ancestor()),
             "tasks": colony.task_firsts,
-            "climatePhase": (world.tick // 2000) % 4,
+            "climatePhase": getattr(world, "machine_band", (world.tick // 2000) % 4),
             "weather": {
                 "storms": getattr(world, "storm_count", 0),
                 "lastTick": getattr(world, "last_storm_tick", -1),
@@ -334,6 +334,16 @@ class Habitat:
                 "bloomQuadrant": getattr(world, "last_bloom_quadrant", None),
                 "nextTick": world.next_storm_tick,
                 "warningTicks": getattr(world.config, "storm_warning", 100),
+                # Colony Two's weather is Odin itself; these are the readings
+                # the storms actually fire on.
+                "source": "odin-thermal" if hasattr(world, "machine_band") else "simulated",
+                "band": getattr(world, "machine_band", None),
+                "baselineC": round(getattr(world, "machine_baseline", 0.0), 2),
+                "excessC": round(getattr(world, "machine_excess", 0.0), 2),
+                "warningC": getattr(world, "machine_warning_delta", None),
+                "triggerC": getattr(world, "machine_trigger_delta", None),
+                "warning": (getattr(world, "machine_excess", 0.0)
+                            >= getattr(world, "machine_warning_delta", 1e9)),
             },
             "activeSignals": active_signals,
             "signalsHeard": sum(getattr(o, "signals_heard", 0) for o in colony.organisms),
