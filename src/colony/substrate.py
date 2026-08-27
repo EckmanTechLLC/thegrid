@@ -84,6 +84,7 @@ class SubstrateWorld(World):
         new = cls(old.config)
         new.energy = old.energy
         new.scrap = getattr(old, "scrap", new.scrap)
+        new.bus = getattr(old, "bus", new.bus)
         new.memory_used = old.memory_used
         new.instructions_this_tick = old.instructions_this_tick
         new.tick = old.tick

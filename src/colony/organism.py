@@ -30,6 +30,8 @@ class Organism:
     last_inputs: tuple[int, int] = (0, 0)
     input_index: int = 0
     signals_sent: int = 0
+    bus_writes: int = 0
+    bus_reads: int = 0
     signals_heard: int = 0
     signal_guided_moves: int = 0
     post_signal_harvested: float = 0.0
@@ -102,7 +104,8 @@ class Organism:
             word = self.genome[self.ip % len(self.genome)]
             from_routine = False
         op = Op(word) if 0 <= word < NUM_OPS else Op.NOP
-        if op in (Op.ADD, Op.SUB, Op.XOR, Op.LOAD, Op.STORE, Op.JMPR):
+        if op in (Op.ADD, Op.SUB, Op.XOR, Op.LOAD, Op.STORE, Op.JMPR,
+                  Op.POST, Op.FETCH):
             name = ISA[op].name
             self.experimental_ops[name] = self.experimental_ops.get(name, 0) + 1
             colony.experimental_ops[name] += 1
@@ -302,6 +305,14 @@ class Organism:
                     and colony.world.tick < self.forecast_due_tick
                     and scratch[slot] == self.forecast_target):
                 self.forecast_stored_mask |= 1 << slot
+        elif op == Op.POST:
+            colony.world.bus_post(self.b, self.a, writer=self.id)
+            self.bus_writes = getattr(self, "bus_writes", 0) + 1
+            colony.bus_writes = getattr(colony, "bus_writes", 0) + 1
+        elif op == Op.FETCH:
+            self.a = colony.world.bus_fetch(self.b)
+            self.bus_reads = getattr(self, "bus_reads", 0) + 1
+            colony.bus_reads = getattr(colony, "bus_reads", 0) + 1
         elif op == Op.JMPR:
             next_ip = (self.ip + (self.c % 15) - 7) % len(self.genome)
         elif op == Op.SALVAGE:

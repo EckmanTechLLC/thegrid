@@ -19,7 +19,7 @@ from aiohttp import web
 
 from .colony import Colony
 from .history import LineageHistory, genome_id
-from .isa import ISA, build_ancestor, build_founder_palette
+from .isa import ISA, Op, build_ancestor, build_founder_palette
 from .odin_operator import OdinMutator
 from .record import ALPHABET, encode_energy, encode_genome, encode_positions
 from .tasks import TemporalTaskEnvironment
@@ -123,7 +123,13 @@ class Habitat:
                 colony.world.slot_uses = [0] * 16
             if not hasattr(colony.world, "slot_owner"):
                 colony.world.slot_owner = [-1] * 16
-            for _c in ("published", "calls", "self_writes", "royalty_events"):
+            if not hasattr(colony.world, "bus"):
+                colony.world.bus = [0] * 16
+                colony.world.bus_writes = colony.world.bus_reads = 0
+                colony.world.bus_written_at = [-1] * 16
+                colony.world.bus_writer = [-1] * 16
+            for _c in ("published", "calls", "self_writes", "royalty_events",
+                       "bus_writes", "bus_reads"):
                 if not hasattr(colony, _c):
                     setattr(colony, _c, 0)
             if not hasattr(colony, "royalties"):
@@ -139,7 +145,7 @@ class Habitat:
                              "moves", "scans", "guided_moves", "post_move_harvested",
                              "task_inputs_seen", "signals_heard", "signal_guided_moves",
                              "post_signal_harvested", "weather_cues_seen",
-                             "weather_cue_signals"):
+                             "weather_cue_signals", "bus_writes", "bus_reads"):
                     if not hasattr(organism, name):
                         setattr(organism, name, 0)
                 for name in ("scan_pending", "listen_pending", "awaiting_post_move_harvest",
@@ -344,6 +350,17 @@ class Habitat:
                 "triggerC": getattr(world, "machine_trigger_delta", None),
                 "warning": (getattr(world, "machine_excess", 0.0)
                             >= getattr(world, "machine_warning_delta", 1e9)),
+            },
+            "bus": {
+                "words": list(getattr(world, "bus", [])),
+                "writes": getattr(colony, "bus_writes", 0),
+                "reads": getattr(colony, "bus_reads", 0),
+                "writtenAt": list(getattr(world, "bus_written_at", [])),
+                "writers": len({w for w in getattr(world, "bus_writer", [])
+                                if w >= 0}),
+                "carriers": sum(1 for o in colony.organisms
+                                if any(word in (int(Op.POST), int(Op.FETCH))
+                                       for word in o.genome)),
             },
             "activeSignals": active_signals,
             "signalsHeard": sum(getattr(o, "signals_heard", 0) for o in colony.organisms),

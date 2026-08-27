@@ -38,6 +38,8 @@ class Op(IntEnum):
     PUBLISH = 30
     CALL = 31
     WRITE = 32
+    POST = 33
+    FETCH = 34
 
 
 @dataclass(frozen=True)
@@ -91,6 +93,16 @@ ISA = [
     # write: self-modification during life. Because COPY reads from the genome,
     # acquired edits are inherited — Lamarckian, impossible biologically.
     Instruction("write", 0.50, "write A into own genome at position B"),
+    # post/fetch: a shared data bus. Signalling is spatial -- it decays with
+    # distance and cannot cross a quadrant -- which is how a chemical gradient
+    # works, not how a machine does. Programs leave values at an ADDRESS and
+    # any other program reads that address from anywhere. This is the only
+    # channel in the world with no geometry, so it is the only way a sensor in
+    # one biome can inform a forager in another without either of them moving.
+    # Nothing enforces honesty: an address is equally available for a true
+    # reading, a stale one, or a deliberate lie.
+    Instruction("post", 0.40, "publish A to shared bus address B"),
+    Instruction("fetch", 0.20, "read shared bus address B into A"),
 ]
 
 NUM_OPS = len(ISA)
@@ -120,6 +132,9 @@ def build_founder_palette() -> list[list[int]]:
         [*core, Op.SIGNAL],
         [*core, Op.LISTEN, Op.MOVE, Op.HARVEST],
         [*core, Op.STORE, Op.LOAD],
+        # bus ingredients, in the same style as the rest: the words are present
+        # and adjacent, but nothing here is a working publish/consume circuit.
+        [*core, Op.POST, Op.FETCH],
         [*core, Op.INC, Op.PUSH, Op.ADD],
         [*core, Op.INPUT, Op.INPUT, Op.OUTPUT],
         [*core, Op.PEEK],

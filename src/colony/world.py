@@ -71,6 +71,13 @@ class World:
         self.code_slots: list[list[int]] = [[] for _ in range(16)]
         self.slot_uses: list[int] = [0] * 16
         self.slot_owner: list[int] = [-1] * 16
+        # shared data bus: 16 global words, reachable from any tile. Unlike a
+        # signal it does not attenuate, expire, or respect a biome boundary.
+        self.bus: list[int] = [0] * 16
+        self.bus_writes: int = 0
+        self.bus_reads: int = 0
+        self.bus_written_at: list[int] = [-1] * 16
+        self.bus_writer: list[int] = [-1] * 16
 
         self.memory_used: int = 0
         self.heat: float = 0.0
@@ -145,7 +152,8 @@ class World:
                 local = 1.3
         else:  # information: communication, memory, and computation are cheap
             if op in (Op.SIGNAL, Op.LISTEN, Op.INPUT, Op.OUTPUT, Op.ADD, Op.SUB,
-                      Op.XOR, Op.LOAD, Op.STORE, Op.NAND, Op.PEEK, Op.COPYN):
+                      Op.XOR, Op.LOAD, Op.STORE, Op.NAND, Op.PEEK, Op.COPYN,
+                      Op.POST):
                 local = 0.55
             elif op in (Op.HARVEST, Op.BUILD):
                 local = 1.35
@@ -168,6 +176,19 @@ class World:
         slot %= len(self.code_slots)
         self.slot_uses[slot] += 1
         return self.code_slots[slot]
+
+    # ── shared data bus ───────────────────────────────────────────────────
+    def bus_post(self, address: int, value: int, writer: int = -1) -> None:
+        """Leave a value at a global address. Last writer wins; no validation."""
+        address %= len(self.bus)
+        self.bus[address] = value & 0xFF
+        self.bus_written_at[address] = self.tick
+        self.bus_writer[address] = writer
+        self.bus_writes += 1
+
+    def bus_fetch(self, address: int) -> int:
+        self.bus_reads += 1
+        return self.bus[address % len(self.bus)]
 
     def signal(self, x: int, y: int, value: int) -> None:
         radius = getattr(self.config, "signal_radius", 3)
