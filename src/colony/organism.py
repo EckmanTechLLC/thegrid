@@ -105,7 +105,7 @@ class Organism:
             from_routine = False
         op = Op(word) if 0 <= word < NUM_OPS else Op.NOP
         if op in (Op.ADD, Op.SUB, Op.XOR, Op.LOAD, Op.STORE, Op.JMPR,
-                  Op.POST, Op.FETCH):
+                  Op.POST, Op.FETCH, Op.LOCATE):
             name = ISA[op].name
             self.experimental_ops[name] = self.experimental_ops.get(name, 0) + 1
             colony.experimental_ops[name] += 1
@@ -309,6 +309,8 @@ class Organism:
             colony.world.bus_post(self.b, self.a, writer=self.id)
             self.bus_writes = getattr(self, "bus_writes", 0) + 1
             colony.bus_writes = getattr(colony, "bus_writes", 0) + 1
+        elif op == Op.LOCATE:
+            self.a = colony.world.biome(self.x, self.y)
         elif op == Op.FETCH:
             self.a = colony.world.bus_fetch(self.b)
             self.bus_reads = getattr(self, "bus_reads", 0) + 1

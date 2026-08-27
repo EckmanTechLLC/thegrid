@@ -40,6 +40,7 @@ class Op(IntEnum):
     WRITE = 32
     POST = 33
     FETCH = 34
+    LOCATE = 35
 
 
 @dataclass(frozen=True)
@@ -103,6 +104,12 @@ ISA = [
     # reading, a stale one, or a deliberate lie.
     Instruction("post", 0.40, "publish A to shared bus address B"),
     Instruction("fetch", 0.20, "read shared bus address B into A"),
+    # locate: a program can ask where it is running. Without it a fetched band
+    # is unusable in principle -- knowing that quadrant 1 will burn tells you
+    # nothing unless you can ask whether you are standing in quadrant 1. Every
+    # other link in that chain already exists (input, post, fetch, sub, ifzero,
+    # move); this is the one that was missing.
+    Instruction("locate", 0.15, "read the current quadrant into A"),
 ]
 
 NUM_OPS = len(ISA)
@@ -135,6 +142,7 @@ def build_founder_palette() -> list[list[int]]:
         # bus ingredients, in the same style as the rest: the words are present
         # and adjacent, but nothing here is a working publish/consume circuit.
         [*core, Op.POST, Op.FETCH],
+        [*core, Op.LOCATE, Op.FETCH],
         [*core, Op.INC, Op.PUSH, Op.ADD],
         [*core, Op.INPUT, Op.INPUT, Op.OUTPUT],
         [*core, Op.PEEK],
