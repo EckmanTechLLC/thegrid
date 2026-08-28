@@ -67,9 +67,22 @@ class SubstrateWorld(World):
     # actually doing. Baseline is a slow EMA rather than a fixed threshold:
     # idle Tctl already sits above thermal_threshold_c, so only a *rise*
     # above the recent trailing average counts as an event.
-    machine_alpha = 0.002          # EMA rate; ~500 ticks of thermal memory
-    machine_warning_delta = 0.30   # degrees over baseline that raise a warning
-    machine_trigger_delta = 0.80   # degrees over baseline that fire a storm
+    # Tctl on this chip swings 62 -> 96C within seconds on boost transients.
+    # Comparing an instantaneous read against a 60-second baseline measured
+    # that noise, not load: storms fired in roughly half of all refractory
+    # windows. Both sides are now smoothed. The fast EMA (~1000 ticks, ~2min)
+    # is the current reading, the slow one (~10000 ticks, ~20min) is what this
+    # box has been doing lately, and weather is the gap between them. A boost
+    # spike moves the fast average a fraction of a degree; a sustained load -
+    # an indexer pass, an inference run - moves it by ten or more.
+    machine_fast_alpha = 0.001     # ~1000 ticks: the smoothed current reading
+    machine_alpha = 0.0001         # ~10000 ticks: what counts as normal here
+    # Measured against scripted transients: a 2s boost to 96C peaks the fast
+    # average at +0.43 and a 5s one at +1.07, while five minutes of indexer at
+    # 78C reaches +12.4. These thresholds sit in that gap, so a spike raises
+    # neither the cue nor a storm and a real workload raises both.
+    machine_warning_delta = 1.00   # degrees over baseline that raise a warning
+    machine_trigger_delta = 1.50   # degrees over baseline that fire a storm
     machine_memory_band = 0.50     # cgroup pressure that flips the memory bit
     storm_refractory = 1000        # ticks a storm may not re-fire within
 
@@ -166,11 +179,16 @@ class SubstrateWorld(World):
             return
         self._machine_tick = self.tick
         heat = self.heat
+        fast = getattr(self, "machine_heat_fast", None)
+        if fast is None:
+            fast = heat
+        fast += (heat - fast) * self.machine_fast_alpha
+        self.machine_heat_fast = fast
         baseline = getattr(self, "machine_baseline", None)
         if baseline is None:
-            baseline = heat
-        self.machine_baseline = baseline + (heat - baseline) * self.machine_alpha
-        self.machine_excess = heat - self.machine_baseline
+            baseline = fast
+        self.machine_baseline = baseline + (fast - baseline) * self.machine_alpha
+        self.machine_excess = fast - self.machine_baseline
         try:
             self.machine_memory = self.memory_pressure
         except (OSError, RuntimeError, ZeroDivisionError):
@@ -229,7 +247,13 @@ class SubstrateWorld(World):
 
     @property
     def cost_multiplier(self) -> float:
-        over = self.heat - self.thermal_threshold_c
+        # Priced off the smoothed reading, not the instantaneous one. On raw
+        # Tctl a two-second boost spike tripled the cost of every instruction
+        # in the colony; sustained heat still does, which is the intent.
+        heat = getattr(self, "machine_heat_fast", None)
+        if heat is None:
+            heat = self.heat
+        over = heat - self.thermal_threshold_c
         return 1.0 + self.thermal_penalty * over if over > 0 else 1.0
 
     def step(self) -> None:
