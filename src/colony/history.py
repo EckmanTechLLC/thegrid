@@ -106,6 +106,29 @@ class LineageHistory:
             CREATE INDEX IF NOT EXISTS transitions_recent
                 ON transitions(epoch DESC, last_tick DESC);
         """)
+        # The mechanics added in epochs 28-29 - the bus, the reclaim pool,
+        # commons heat, and the machine's own thermal and CPU state - existed
+        # only in the live snapshot, so nothing about them survived the tick
+        # they happened in. Averages for instantaneous quantities, last-value
+        # for cumulative counters, so deltas can be taken between buckets.
+        ecology_columns = {row[1] for row in
+                           self._db.execute("PRAGMA table_info(ecology_buckets)")}
+        for _name in ('cost_sum',
+                      'thermal_excess_sum',
+                      'machine_spare_sum',
+                      'regen_sum',
+                      'reclaim_pool_sum',
+                      'slots_held_sum',
+                      'bus_writes_end',
+                      'bus_reads_end',
+                      'published_end',
+                      'calls_end',
+                      'publish_refused_end',
+                      'salvaged_end'):
+            if _name not in ecology_columns:
+                self._db.execute(
+                    f"ALTER TABLE ecology_buckets ADD COLUMN {_name} REAL NOT NULL DEFAULT 0")
+
         columns = {row[1] for row in self._db.execute("PRAGMA table_info(genome_stats)")}
         if "first_generation" not in columns:
             self._db.execute("ALTER TABLE genome_stats ADD COLUMN first_generation INTEGER")
@@ -244,7 +267,13 @@ class LineageHistory:
 
     def record_ecology(self, epoch: int, tick: int, *, population: int,
                        diversity: int, dominance: float, genome_length: float,
-                       resources: float, built: int, signals: int) -> None:
+                       resources: float, built: int, signals: int,
+                       cost: float = 1.0, thermal_excess: float = 0.0,
+                       machine_spare: float = 1.0, regen: float = 1.0,
+                       reclaim_pool: float = 0.0, slots_held: int = 0,
+                       bus_writes: int = 0, bus_reads: int = 0,
+                       published: int = 0, calls: int = 0,
+                       publish_refused: int = 0, salvaged: float = 0.0) -> None:
         """Store bounded per-500-tick ecology aggregates, never per-frame rows."""
         with self._lock:
             if epoch not in self._last_ecology_tick:
@@ -260,8 +289,9 @@ class LineageHistory:
                 INSERT INTO ecology_buckets(
                     epoch,bucket,start_tick,end_tick,samples,population_sum,
                     population_min,population_max,diversity_sum,dominance_sum,
-                    genome_length_sum,resource_sum,built_sum,signals_sum)
-                VALUES(?,?,?,?,1,?,?,?,?,?,?,?,?,?)
+                    genome_length_sum,resource_sum,built_sum,signals_sum,
+                    cost_sum,thermal_excess_sum,machine_spare_sum,regen_sum,reclaim_pool_sum,slots_held_sum,bus_writes_end,bus_reads_end,published_end,calls_end,publish_refused_end,salvaged_end)
+                VALUES(?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(epoch,bucket) DO UPDATE SET
                     end_tick=excluded.end_tick,
                     samples=samples+1,
@@ -273,9 +303,24 @@ class LineageHistory:
                     genome_length_sum=genome_length_sum+excluded.genome_length_sum,
                     resource_sum=resource_sum+excluded.resource_sum,
                     built_sum=built_sum+excluded.built_sum,
-                    signals_sum=signals_sum+excluded.signals_sum
+                    signals_sum=signals_sum+excluded.signals_sum,
+                    cost_sum=cost_sum+excluded.cost_sum,
+                    thermal_excess_sum=thermal_excess_sum+excluded.thermal_excess_sum,
+                    machine_spare_sum=machine_spare_sum+excluded.machine_spare_sum,
+                    regen_sum=regen_sum+excluded.regen_sum,
+                    reclaim_pool_sum=reclaim_pool_sum+excluded.reclaim_pool_sum,
+                    slots_held_sum=slots_held_sum+excluded.slots_held_sum,
+                    bus_writes_end=excluded.bus_writes_end,
+                    bus_reads_end=excluded.bus_reads_end,
+                    published_end=excluded.published_end,
+                    calls_end=excluded.calls_end,
+                    publish_refused_end=excluded.publish_refused_end,
+                    salvaged_end=excluded.salvaged_end
             """, (epoch, bucket, tick, tick, population, population, population,
-                  diversity, dominance, genome_length, resources, built, signals))
+                  diversity, dominance, genome_length, resources, built, signals,
+                  cost, thermal_excess, machine_spare, regen, reclaim_pool,
+                  slots_held, bus_writes, bus_reads, published, calls,
+                  publish_refused, salvaged))
             self._last_ecology_tick[epoch] = tick
 
     def flush(self) -> None:
@@ -381,6 +426,12 @@ class LineageHistory:
                 "resources_avg": round(row.pop("resource_sum") / samples, 2),
                 "built_avg": round(row.pop("built_sum") / samples, 2),
                 "signals_avg": round(row.pop("signals_sum") / samples, 2),
+                "cost_avg": round(row.pop("cost_sum", 0.0) / samples, 4),
+                "thermal_excess_avg": round(row.pop("thermal_excess_sum", 0.0) / samples, 4),
+                "machine_spare_avg": round(row.pop("machine_spare_sum", 0.0) / samples, 4),
+                "regen_avg": round(row.pop("regen_sum", 0.0) / samples, 4),
+                "reclaim_pool_avg": round(row.pop("reclaim_pool_sum", 0.0) / samples, 4),
+                "slots_held_avg": round(row.pop("slots_held_sum", 0.0) / samples, 4),
             })
             ecology.append(row)
         return {
