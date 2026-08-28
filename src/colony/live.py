@@ -533,10 +533,33 @@ async def create_app(habitat: Habitat, ticks_per_second: int) -> web.Application
     app.router.add_get("/api/organisms", tile_organisms)
     app.router.add_get("/api/organism/{epoch:\\d+}/{organism_id:\\d+}", organism_detail)
 
+    # The aggregate queries grow with the fossil record -- at 419MB they take
+    # 2-4 seconds. to_thread keeps them off the event loop, but a 5-second poll
+    # against a 4-second query means the box is almost always mid-summary, and
+    # every viewer that connects adds another one. Cache the result and let
+    # concurrent callers share the single in-flight computation.
+    history_cache: dict = {"at": 0.0, "epoch": None, "data": None}
+    history_lock = asyncio.Lock()
+    HISTORY_TTL = 25.0
+
+    def _fresh_history() -> dict | None:
+        if (history_cache["data"] is not None
+                and history_cache["epoch"] == habitat.epoch
+                and time.monotonic() - history_cache["at"] < HISTORY_TTL):
+            return history_cache["data"]
+        return None
+
     async def history_summary(request: web.Request) -> web.Response:
-        # The aggregate queries grow with the fossil record. Keep them off the
-        # aiohttp event loop so history refreshes cannot pause the live stream.
-        summary = await asyncio.to_thread(habitat.history.summary, habitat.epoch)
+        summary = _fresh_history()
+        if summary is None:
+            async with history_lock:
+                # Another caller may have refreshed it while we waited.
+                summary = _fresh_history()
+                if summary is None:
+                    summary = await asyncio.to_thread(habitat.history.summary,
+                                                      habitat.epoch)
+                    history_cache.update(at=time.monotonic(),
+                                         epoch=habitat.epoch, data=summary)
         return web.json_response(
             summary,
             dumps=lambda x: json.dumps(x, separators=(",", ":")),
