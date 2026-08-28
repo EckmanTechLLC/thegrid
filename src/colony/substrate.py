@@ -73,6 +73,23 @@ class SubstrateWorld(World):
     machine_memory_band = 0.50     # cgroup pressure that flips the memory bit
     storm_refractory = 1000        # ticks a storm may not re-fire within
 
+    # -- Odin's spare capacity is the colony's income ----------------------
+    # Tile regeneration is not a pasture. It is whatever scheduler time this
+    # machine is not already spending on something else, so running a model is
+    # a famine and an idle night is a harvest. Measured system-wide from
+    # /proc/stat: a cgroup cannot distinguish "I was not scheduled" from "I did
+    # not ask", but the box's idle fraction is unambiguous.
+    #
+    # Scaled against a slow trailing baseline rather than an absolute, because
+    # 32 cores idle at ~0.99 spare and no fixed threshold would ever fire. What
+    # matters is the DEVIATION: income tracks (spare / usual spare) squared.
+    # There is deliberately no floor. If Odin is busy for long enough the
+    # colony starves, and extinction is a legitimate outcome.
+    cpu_alpha = 0.002              # EMA rate for the spare-capacity baseline
+    cpu_sample_interval = 0.5      # seconds between /proc/stat reads
+    regen_exponent = 2.0           # how sharply income follows spare capacity
+    regen_ceiling = 1.5            # an unusually quiet box pays a bounded bonus
+
     def __init__(self, config: WorldConfig | None = None):
         super().__init__(config)
         self._pages: list[bytearray] = []
@@ -160,11 +177,52 @@ class SubstrateWorld(World):
         # Compatibility with World.__init__; thermal state is sensor-owned.
         pass
 
+    @staticmethod
+    def _cpu_totals() -> tuple[int, int]:
+        """(idle+iowait, total) jiffies for the whole machine."""
+        fields = [int(v) for v in
+                  open("/proc/stat").readline().split()[1:]]
+        return fields[3] + fields[4], sum(fields)
+
+    def _sample_cpu(self) -> None:
+        """Refresh the machine's spare-capacity reading, at most every 0.5s."""
+        now = time.monotonic()
+        if now - getattr(self, "_cpu_sampled_at", 0.0) < self.cpu_sample_interval:
+            return
+        try:
+            idle, total = self._cpu_totals()
+        except (OSError, ValueError, IndexError):
+            return
+        previous = getattr(self, "_cpu_prev", None)
+        self._cpu_prev = (idle, total)
+        self._cpu_sampled_at = now
+        if previous is None:
+            return
+        idle_delta, total_delta = idle - previous[0], total - previous[1]
+        if total_delta <= 0:
+            return
+        spare = max(0.0, min(1.0, idle_delta / total_delta))
+        baseline = getattr(self, "machine_spare_baseline", None)
+        if baseline is None:
+            baseline = spare
+        self.machine_spare_baseline = baseline + (spare - baseline) * self.cpu_alpha
+        self.machine_spare = spare
+
+    @property
+    def regen_multiplier(self) -> float:
+        """Income as a share of what this machine usually has going spare."""
+        baseline = getattr(self, "machine_spare_baseline", 0.0)
+        if baseline <= 0.0:
+            return 1.0
+        ratio = getattr(self, "machine_spare", baseline) / baseline
+        return min(self.regen_ceiling, max(0.0, ratio) ** self.regen_exponent)
+
     def _sample_machine(self) -> None:
         """Take one reading of Odin per tick; everything else reuses it."""
         if getattr(self, "_machine_tick", None) == self.tick:
             return
         self._machine_tick = self.tick
+        self._sample_cpu()
         heat = self.heat
         baseline = getattr(self, "machine_baseline", None)
         if baseline is None:
@@ -239,6 +297,9 @@ class SubstrateWorld(World):
         self.apply_resource_storm()
         # The favoured biome tracks the machine, not a 2000-tick carousel.
         phase = self.machine_band
+        # Income is Odin's spare capacity. No floor: a busy enough box is a
+        # famine, and a long enough famine is an extinction.
+        regen = self.regen_multiplier
         for y, row in enumerate(self.energy):
             for x in range(c.width):
                 if row[x] < c.tile_capacity:
@@ -246,7 +307,9 @@ class SubstrateWorld(World):
                     climate = 1.8 if biome == phase else 0.55
                     base = (1.25, 0.65, 0.40, 0.75)[biome]
                     construction = self.structures[y][x] * 0.003 * (4.0 if biome == 2 else 0.6)
-                    row[x] = min(c.tile_capacity, row[x] + c.tile_regen * climate * base + construction)
+                    row[x] = min(c.tile_capacity,
+                                 row[x] + c.tile_regen * climate * base * regen
+                                 + construction)
                 if self.signal_strength[y][x] > 0:
                     self.signal_strength[y][x] -= 1
                     if self.signal_strength[y][x] == 0:
@@ -266,6 +329,8 @@ class SubstrateWorld(World):
         state.pop("_cgroup", None)
         state.pop("_temp_cache", None)
         state.pop("_machine_tick", None)
+        state.pop("_cpu_prev", None)
+        state.pop("_cpu_sampled_at", None)
         return state
 
     def __setstate__(self, state):

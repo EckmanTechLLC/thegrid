@@ -362,6 +362,12 @@ class Habitat:
                 "warning": (getattr(world, "machine_excess", 0.0)
                             >= getattr(world, "machine_warning_delta", 1e9)),
             },
+            "machine": {
+                "spare": round(getattr(world, "machine_spare", 1.0), 4),
+                "spareBaseline": round(getattr(world, "machine_spare_baseline", 1.0), 4),
+                "regen": round(getattr(world, "regen_multiplier", 1.0), 3),
+                "cpuUsageUsec": getattr(world, "cpu_usage_usec", 0),
+            },
             "bus": {
                 "words": list(getattr(world, "bus", [])),
                 "writes": getattr(colony, "bus_writes", 0),
