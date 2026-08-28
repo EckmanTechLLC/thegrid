@@ -309,6 +309,23 @@ class Habitat:
             genome_length=average_genome_length,
             resources=world.total_energy() / (world.config.width * world.config.height),
             built=built_tiles, signals=active_signals,
+            cost=world.cost_multiplier,
+            thermal_excess=getattr(world, "machine_excess", 0.0),
+            machine_spare=getattr(world, "machine_spare", 1.0),
+            regen=getattr(world, "regen_multiplier", 1.0),
+            # Colony three still keeps its reclaimable energy on the map;
+            # summing it keeps the column comparable across both arms.
+            reclaim_pool=(getattr(world, "reclaim_pool", None)
+                          if getattr(world, "reclaim_pool", None) is not None
+                          else sum(sum(r) for r in getattr(world, "scrap", []))),
+            slots_held=sum(1 for v in getattr(world, "slot_heat", [])
+                           if v >= getattr(world, "slot_hold_threshold", 0.5)),
+            bus_writes=getattr(colony, "bus_writes", 0),
+            bus_reads=getattr(colony, "bus_reads", 0),
+            published=getattr(colony, "published", 0),
+            calls=getattr(colony, "calls", 0),
+            publish_refused=getattr(colony, "publish_refused", 0),
+            salvaged=getattr(colony, "salvaged", 0.0),
         )
         details = [self._organism_detail(o, tick=world.tick) for o in colony.organisms]
         self.organism_latest = {(self.epoch, item["id"]): item for item in details}
