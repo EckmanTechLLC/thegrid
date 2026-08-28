@@ -28,10 +28,20 @@ from .world import WorldConfig
 
 
 class Habitat:
+    ORDINALS = {"": "One", "2": "Two", "3": "Three", "4": "Four", "5": "Five"}
+
+    @classmethod
+    def default_name(cls, state_path: Path) -> str:
+        """Name the habitat after its state directory, not the source tree."""
+        stem = state_path.parent.name
+        suffix = stem.split("colony")[-1] if "colony" in stem else ""
+        return "Colony " + cls.ORDINALS.get(suffix, suffix or "One")
+
     def __init__(self, state_path: Path, seed: int = 42, founders: int = 13,
                  physical: bool = True, mutator_kind: str = "odin",
-                 width: int = 48, height: int = 48):
+                 width: int = 48, height: int = 48, name: str | None = None):
         self.state_path = state_path
+        self.name = name or self.default_name(state_path)
         self.seed = seed
         self.founders = founders
         self.width = width
@@ -332,6 +342,7 @@ class Habitat:
             "isa": [item.name for item in ISA],
             "ancestor": encode_genome(build_ancestor()),
             "tasks": colony.task_firsts,
+            "name": self.name,
             "climatePhase": getattr(world, "machine_band", (world.tick // 2000) % 4),
             "weather": {
                 "storms": getattr(world, "storm_count", 0),
@@ -597,10 +608,12 @@ def main() -> None:
     parser.add_argument("--ticks-per-second", type=int, default=100)
     parser.add_argument("--mutator", choices=("odin", "random"), default="odin")
     parser.add_argument("--retire-current-epoch", action="store_true")
+    parser.add_argument("--name", default=None,
+                        help="display name; defaults to the state directory")
     parser.add_argument("--state", type=Path,
                         default=Path.home() / ".local/state/thegrid/colony.pkl")
     args = parser.parse_args()
-    habitat = Habitat(args.state, mutator_kind=args.mutator)
+    habitat = Habitat(args.state, mutator_kind=args.mutator, name=args.name)
     if args.retire_current_epoch:
         habitat.retire_current_epoch()
         habitat.history.close()
