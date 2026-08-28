@@ -363,6 +363,8 @@ class Habitat:
                 "source": "odin-thermal" if hasattr(world, "machine_band") else "simulated",
                 "band": getattr(world, "machine_band", None),
                 "baselineC": round(getattr(world, "machine_baseline", 0.0), 2),
+                "heatFastC": round(getattr(world, "machine_heat_fast", 0.0), 2),
+                "heatRawC": round(world.heat, 2),
                 "excessC": round(getattr(world, "machine_excess", 0.0), 2),
                 "warningC": getattr(world, "machine_warning_delta", None),
                 "triggerC": getattr(world, "machine_trigger_delta", None),
