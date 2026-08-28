@@ -133,13 +133,20 @@ class Habitat:
                 colony.world.slot_uses = [0] * 16
             if not hasattr(colony.world, "slot_owner"):
                 colony.world.slot_owner = [-1] * 16
+            if not hasattr(colony.world, "slot_heat"):
+                colony.world.slot_heat = [0.0] * 16
+            if not hasattr(colony.world, "reclaim_pool"):
+                # Fold any scrap still lying on the map into the pool rather
+                # than deleting energy the colony had already earned.
+                colony.world.reclaim_pool = sum(
+                    sum(row) for row in getattr(colony.world, "scrap", []))
             if not hasattr(colony.world, "bus"):
                 colony.world.bus = [0] * 16
                 colony.world.bus_writes = colony.world.bus_reads = 0
                 colony.world.bus_written_at = [-1] * 16
                 colony.world.bus_writer = [-1] * 16
             for _c in ("published", "calls", "self_writes", "royalty_events",
-                       "bus_writes", "bus_reads"):
+                       "bus_writes", "bus_reads", "publish_refused"):
                 if not hasattr(colony, _c):
                     setattr(colony, _c, 0)
             if not hasattr(colony, "royalties"):
@@ -395,7 +402,12 @@ class Habitat:
             "scrapField": "".join(ALPHABET[min(31, int(value))]
                                   for row in world.scrap for value in row),
             "scrapTiles": sum(value > 0 for row in world.scrap for value in row),
-            "scrapAvailable": round(sum(sum(row) for row in world.scrap), 2),
+            "scrapAvailable": round(getattr(world, "reclaim_pool", 0.0), 2),
+            "reclaimPool": round(getattr(world, "reclaim_pool", 0.0), 2),
+            "publishRefused": getattr(colony, "publish_refused", 0),
+            "slotHeat": [round(v, 2) for v in getattr(world, "slot_heat", [])],
+            "slotsHeld": sum(1 for v in getattr(world, "slot_heat", [])
+                             if v >= getattr(world, "slot_hold_threshold", 0.5)),
             "scrapDeposited": round(colony.scrap_deposited, 2),
             "salvaged": round(colony.salvaged, 2),
             "published": getattr(colony, "published", 0),

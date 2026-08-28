@@ -71,6 +71,13 @@ class World:
         self.code_slots: list[list[int]] = [[] for _ in range(16)]
         self.slot_uses: list[int] = [0] * 16
         self.slot_owner: list[int] = [-1] * 16
+        # A slot is held while it is being called and released when it goes
+        # cold. Without this, publish overwrites unconditionally and no routine
+        # survives long enough to be worth calling.
+        self.slot_heat: list[float] = [0.0] * 16
+        # Reclaimed memory. free() has no location and does not rot: what a
+        # dead program held returns to one pool that any allocator can draw on.
+        self.reclaim_pool: float = 0.0
         # shared data bus: 16 global words, reachable from any tile. Unlike a
         # signal it does not attenuate, expire, or respect a biome boundary.
         self.bus: list[int] = [0] * 16
@@ -166,16 +173,33 @@ class World:
         return 1.75 if self.biome(x, y) == 3 else 0.75
 
     # ── shared code commons ───────────────────────────────────────────────
-    def publish_routine(self, slot: int, words: list[int], owner: int = -1) -> None:
+    slot_hold_threshold = 0.5   # call-heat below which a slot may be claimed
+    slot_decay = 0.999          # per-tick decay of a slot's call heat
+
+    def publish_routine(self, slot: int, words: list[int], owner: int = -1) -> bool:
+        """Claim an address. Fails while the current occupant is still called."""
         slot %= len(self.code_slots)
+        heat = getattr(self, "slot_heat", [0.0] * len(self.code_slots))[slot]
+        if self.code_slots[slot] and heat >= self.slot_hold_threshold:
+            return False
         self.code_slots[slot] = list(words[:8])
         self.slot_uses[slot] = 0
+        self.slot_heat[slot] = 0.0
         self.slot_owner[slot] = owner
+        return True
 
     def get_routine(self, slot: int) -> list[int]:
         slot %= len(self.code_slots)
         self.slot_uses[slot] += 1
+        self.slot_heat[slot] += 1.0
         return self.code_slots[slot]
+
+    def decay_commons(self) -> None:
+        """Once per tick: a routine nobody calls loosens its grip on its slot."""
+        heat = self.slot_heat
+        for index, value in enumerate(heat):
+            if value:
+                heat[index] = value * self.slot_decay
 
     # ── shared data bus ───────────────────────────────────────────────────
     def bus_post(self, address: int, value: int, writer: int = -1) -> None:
@@ -224,16 +248,15 @@ class World:
 
     def deposit_scrap(self, x: int, y: int, genome_words: int,
                       remaining_energy: float) -> float:
-        """Leave bounded embodied hardware behind without refunding birth cost."""
-        x, y = self.wrap(x, y)
+        """Return what a dead program held to the pool. Position is irrelevant."""
         amount = min(12.0, genome_words * 0.45 + max(0.0, remaining_energy) * 0.20)
-        self.scrap[y][x] = min(31.0, self.scrap[y][x] + amount)
+        self.reclaim_pool += amount
         return amount
 
     def salvage(self, x: int, y: int) -> float:
-        x, y = self.wrap(x, y)
-        taken = min(5.0, self.scrap[y][x])
-        self.scrap[y][x] -= taken
+        """Take from the reclaim pool. First caller wins, wherever it stands."""
+        taken = min(5.0, self.reclaim_pool)
+        self.reclaim_pool -= taken
         return taken * (1.25 if self.biome(x, y) == 2 else 1.0)
 
     # ── memory ────────────────────────────────────────────────────────────
@@ -356,12 +379,9 @@ class World:
                         self.signals[y][x] = 0
                 if self.tick and self.tick % 500 == 0 and self.structures[y][x] > 0:
                     self.structures[y][x] -= 1
-                if self.scrap[y][x] > 0:
-                    self.scrap[y][x] *= 0.997
-                    if self.scrap[y][x] < 0.05:
-                        self.scrap[y][x] = 0.0
 
         self.heat = self.heat * c.heat_decay + self.instructions_this_tick * c.heat_per_instruction
+        self.decay_commons()
         self.instructions_this_tick = 0
         self.tick += 1
 

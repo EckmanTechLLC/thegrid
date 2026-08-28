@@ -37,6 +37,7 @@ class Colony:
         self.weather_cue_signals = 0
         self.mutation_mechanisms: Counter = Counter()
         self.scrap_deposited = 0.0
+        self.publish_refused = 0
         self.salvaged = 0.0
         self.published = 0      # routines written to the shared code commons
         self.calls = 0          # routine invocations (referenced, not copied)

@@ -326,9 +326,13 @@ class Organism:
             if self.genome and self.energy > 3.0:
                 start = self.b % len(self.genome)
                 seg = [self.genome[(start + k) % len(self.genome)] for k in range(8)]
-                colony.world.publish_routine(self.a, seg, owner=self.id)
-                self.published = getattr(self, "published", 0) + 1
-                colony.published = getattr(colony, "published", 0) + 1
+                if colony.world.publish_routine(self.a, seg, owner=self.id):
+                    self.published = getattr(self, "published", 0) + 1
+                    colony.published = getattr(colony, "published", 0) + 1
+                else:
+                    # The address is held by a routine somebody still calls.
+                    # The energy is spent either way; the claim is refused.
+                    colony.publish_refused = getattr(colony, "publish_refused", 0) + 1
         elif op == Op.CALL:
             routine = colony.world.get_routine(self.a)
             # depth guard: a routine that calls itself cannot run away

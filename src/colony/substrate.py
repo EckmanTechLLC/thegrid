@@ -316,10 +316,7 @@ class SubstrateWorld(World):
                         self.signals[y][x] = 0
                 if self.tick and self.tick % 500 == 0 and self.structures[y][x] > 0:
                     self.structures[y][x] -= 1
-                if self.scrap[y][x] > 0:
-                    self.scrap[y][x] *= 0.997
-                    if self.scrap[y][x] < 0.05:
-                        self.scrap[y][x] = 0.0
+        self.decay_commons()
         self.instructions_this_tick = 0
         self.tick += 1
 
