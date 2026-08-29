@@ -168,9 +168,14 @@ class World:
             elif op in (Op.HARVEST, Op.MOVE):
                 local = 1.3
         else:  # information: communication, memory, and computation are cheap
+            # fetch and locate are sensing and reading; they belong here with
+            # post, which I added alone. link, burn, offer, define and the
+            # macros stay flat deliberately - none of them is an information
+            # act, and pricing them here would be a design choice dressed as a
+            # bug fix.
             if op in (Op.SIGNAL, Op.LISTEN, Op.INPUT, Op.OUTPUT, Op.ADD, Op.SUB,
                       Op.XOR, Op.LOAD, Op.STORE, Op.NAND, Op.PEEK, Op.COPYN,
-                      Op.POST):
+                      Op.POST, Op.FETCH, Op.LOCATE):
                 local = 0.55
             elif op in (Op.HARVEST, Op.BUILD):
                 local = 1.35
