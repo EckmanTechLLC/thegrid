@@ -234,7 +234,14 @@ class World:
         x, y = self.wrap(x, y)
         taken = min(5.0, self.scrap[y][x])
         self.scrap[y][x] -= taken
-        return taken * (1.25 if self.biome(x, y) == 2 else 1.0)
+        # No multiplier. Handing back more than was removed mints energy, and
+        # with the pool no longer decaying that became an uncapped faucet: the
+        # engineer quadrant printed 25% on every reclaim. Colony one found it
+        # within 5,000 ticks - a 9-op salvage loop carrying no harvest at all -
+        # and reproduced until it hit its cgroup ceiling and wedged.
+        # That quadrant keeps its advantage where it costs nothing to conserve:
+        # salvage already runs at 0.45x instruction cost there.
+        return taken
 
     # ── memory ────────────────────────────────────────────────────────────
 
