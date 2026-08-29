@@ -18,6 +18,8 @@ The interfaces are the same either way.
 from dataclasses import dataclass, field
 import random
 
+import time
+
 from .isa import Op
 
 
@@ -74,6 +76,21 @@ class World:
         # shared data bus: 16 global words, reachable from any tile. Unlike a
         # signal it does not attenuate, expire, or respect a biome boundary.
         self.bus: list[int] = [0] * 16
+        # bounties: escrow posted against a bus address, claimed by whoever
+        # writes the wanted value there. Value the population sets itself.
+        self.bounties: list[dict | None] = [None] * 16
+        self.bounty_paid: float = 0.0
+        self.bounty_claims: int = 0
+        self.bounty_expired: int = 0
+        # macro slots: eight opcodes whose meaning the population authors
+        self.macros: list[list[int]] = [[] for _ in range(8)]
+        self.macro_uses: list[int] = [0] * 8
+        self.macro_heat: list[float] = [0.0] * 8
+        self.macro_owner: list[int] = [-1] * 8
+        # real work requested this tick, and the cycles actually spent
+        self.burn_requests: int = 0
+        self.burn_total: int = 0
+        self.burn_ns: int = 0
         self.bus_writes: int = 0
         self.bus_reads: int = 0
         self.bus_written_at: list[int] = [-1] * 16
@@ -185,6 +202,79 @@ class World:
         self.bus_written_at[address] = self.tick
         self.bus_writer[address] = writer
         self.bus_writes += 1
+
+    # ── real work ─────────────────────────────────────────────────────────
+    burn_us_per_request = 60      # real microseconds bought by one burn
+    burn_cap_us = 10_000          # ceiling per tick, so the colony cannot
+                                  # stall its own scheduler entirely
+
+    def burn_request(self) -> None:
+        self.burn_requests += 1
+
+    def spend_cycles(self) -> None:
+        """Do the work the colony actually asked for. Not a simulation of load."""
+        requests, self.burn_requests = self.burn_requests, 0
+        if not requests:
+            return
+        budget_ns = min(self.burn_cap_us, requests * self.burn_us_per_request) * 1000
+        started = time.perf_counter_ns()
+        value = 1.000001
+        while time.perf_counter_ns() - started < budget_ns:
+            for _ in range(256):
+                value = value * 1.0000001 + 0.000001
+        self.burn_ns += time.perf_counter_ns() - started
+        self.burn_total += requests
+
+    # ── bounties ──────────────────────────────────────────────────────────
+    bounty_ttl = 2000             # ticks before unclaimed escrow is refundable
+
+    def offer_bounty(self, address: int, want: int, escrow: float,
+                     owner: int) -> bool:
+        address %= len(self.bounties)
+        if self.bounties[address] is not None or escrow <= 0:
+            return False
+        self.bounties[address] = {"want": want & 0xFF, "escrow": escrow,
+                                  "owner": owner, "tick": self.tick}
+        return True
+
+    def claim_bounty(self, address: int, value: int, writer: int) -> float:
+        """Settle through the ordinary bus write. No separate claim instruction."""
+        address %= len(self.bounties)
+        bounty = self.bounties[address]
+        if bounty is None or writer < 0 or writer == bounty["owner"]:
+            return 0.0
+        if (value & 0xFF) != bounty["want"]:
+            return 0.0
+        self.bounties[address] = None
+        self.bounty_paid += bounty["escrow"]
+        self.bounty_claims += 1
+        return bounty["escrow"]
+
+    # ── macros ────────────────────────────────────────────────────────────
+    macro_hold_threshold = 0.5
+    macro_decay = 0.999
+
+    def define_macro(self, slot: int, words: list[int], owner: int = -1) -> bool:
+        slot %= len(self.macros)
+        if self.macros[slot] and self.macro_heat[slot] >= self.macro_hold_threshold:
+            return False
+        self.macros[slot] = list(words)
+        self.macro_uses[slot] = 0
+        self.macro_heat[slot] = 0.0
+        self.macro_owner[slot] = owner
+        return True
+
+    def run_macro(self, slot: int) -> list[int]:
+        slot %= len(self.macros)
+        self.macro_uses[slot] += 1
+        self.macro_heat[slot] += 1.0
+        return self.macros[slot]
+
+    def decay_macros(self) -> None:
+        heat = self.macro_heat
+        for index, value in enumerate(heat):
+            if value:
+                heat[index] = value * self.macro_decay
 
     def bus_fetch(self, address: int) -> int:
         self.bus_reads += 1
@@ -369,6 +459,7 @@ class World:
                         self.scrap[y][x] = 0.0
 
         self.heat = self.heat * c.heat_decay + self.instructions_this_tick * c.heat_per_instruction
+        self.decay_macros()
         self.instructions_this_tick = 0
         self.tick += 1
 

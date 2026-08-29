@@ -39,9 +39,11 @@ class Habitat:
 
     def __init__(self, state_path: Path, seed: int = 42, founders: int = 13,
                  physical: bool = True, mutator_kind: str = "odin",
-                 width: int = 48, height: int = 48, name: str | None = None):
+                 width: int = 48, height: int = 48, name: str | None = None,
+                 features: set | None = None):
         self.state_path = state_path
         self.name = name or self.default_name(state_path)
+        self.features = set(features or ())
         self.seed = seed
         self.founders = founders
         self.width = width
@@ -82,7 +84,8 @@ class Habitat:
         return Colony(world, mutator, TemporalTaskEnvironment(),
                       seed=self.seed, founders=self.founders,
                       founder_genomes=build_founder_palette(),
-                      founder_copies=4 if self.physical else 1)
+                      founder_copies=4 if self.physical else 1,
+                      features=self.features)
 
     def _load_or_create(self) -> Colony:
         try:
@@ -145,6 +148,22 @@ class Habitat:
             if not hasattr(colony, "royalties"):
                 colony.royalties = 0.0
             colony.tasks = TemporalTaskEnvironment()
+            colony.features = set(self.features)
+            for _c in ("burns", "bounties_offered", "macros_defined", "macro_runs"):
+                if not hasattr(colony, _c):
+                    setattr(colony, _c, 0)
+            if not hasattr(colony.world, "bounties"):
+                colony.world.bounties = [None] * 16
+                colony.world.bounty_paid = 0.0
+                colony.world.bounty_claims = colony.world.bounty_expired = 0
+            if not hasattr(colony.world, "macros"):
+                colony.world.macros = [[] for _ in range(8)]
+                colony.world.macro_uses = [0] * 8
+                colony.world.macro_heat = [0.0] * 8
+                colony.world.macro_owner = [-1] * 8
+            for _w, _v in (("burn_requests", 0), ("burn_total", 0), ("burn_ns", 0)):
+                if not hasattr(colony.world, _w):
+                    setattr(colony.world, _w, _v)
             colony.next_group = getattr(colony, "next_group", 1)
             colony.lifecycle_events = getattr(colony, "lifecycle_events", deque())
             for organism in colony.organisms:
@@ -392,6 +411,21 @@ class Habitat:
                 "triggerC": getattr(world, "machine_trigger_delta", None),
                 "warning": (getattr(world, "machine_excess", 0.0)
                             >= getattr(world, "machine_warning_delta", 1e9)),
+            },
+            "features": sorted(self.features),
+            "frontier": {
+                "burns": getattr(colony, "burns", 0),
+                "burnSeconds": round(getattr(world, "burn_ns", 0) / 1e9, 1),
+                "bountiesOffered": getattr(colony, "bounties_offered", 0),
+                "bountyClaims": getattr(world, "bounty_claims", 0),
+                "bountyPaid": round(getattr(world, "bounty_paid", 0.0), 1),
+                "bountyExpired": getattr(world, "bounty_expired", 0),
+                "bountiesOpen": sum(1 for b in getattr(world, "bounties", [])
+                                    if b is not None),
+                "macrosDefined": getattr(colony, "macros_defined", 0),
+                "macroRuns": getattr(colony, "macro_runs", 0),
+                "macroSlots": [len(m) for m in getattr(world, "macros", [])],
+                "macroUses": list(getattr(world, "macro_uses", [])),
             },
             "complexity": {
                 "median": novel[len(novel) // 2] if novel else 0,
@@ -658,10 +692,13 @@ def main() -> None:
     parser.add_argument("--retire-current-epoch", action="store_true")
     parser.add_argument("--name", default=None,
                         help="display name; defaults to the state directory")
+    parser.add_argument("--features", default="",
+                        help="comma-separated: burn,bounty,macro")
     parser.add_argument("--state", type=Path,
                         default=Path.home() / ".local/state/thegrid/colony.pkl")
     args = parser.parse_args()
-    habitat = Habitat(args.state, mutator_kind=args.mutator, name=args.name)
+    habitat = Habitat(args.state, mutator_kind=args.mutator, name=args.name,
+                      features={f.strip() for f in args.features.split(",") if f.strip()})
     if args.retire_current_epoch:
         habitat.retire_current_epoch()
         habitat.history.close()
