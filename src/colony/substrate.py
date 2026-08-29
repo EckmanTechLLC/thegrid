@@ -101,7 +101,38 @@ class SubstrateWorld(World):
     cpu_alpha = 0.002              # EMA rate for the spare-capacity baseline
     cpu_sample_interval = 0.5      # seconds between /proc/stat reads
     regen_exponent = 2.0           # how sharply income follows spare capacity
-    regen_ceiling = 1.5            # an unusually quiet box pays a bounded bonus
+    regen_ceiling = 1.5
+
+    # -- the grazing subsidy is being withdrawn -----------------------------
+    # Nothing complex ever evolved here because nothing ever required it. A
+    # 12-op grazing loop is a complete answer to this world, so evolution kept
+    # returning one. Tiles were a pasture: free energy, renewed forever, and
+    # computation was optional side income nobody needed.
+    #
+    # Tile yield now decays linearly to zero and does not come back. What is
+    # left afterwards is a machine economy: energy enters only as work the
+    # system sets (tasks), and moves only by being called by another program
+    # (royalties) or by reclaiming what died (salvage). Work, service,
+    # recycling. No field.
+    #
+    # This also wakes something already built and dormant. Task prices float
+    # with crowding, so once grazing stops paying, an organism that can tell
+    # which task is underpriced and switch to it out-earns one that cannot -
+    # which needs internal state and a model of the world.
+    #
+    # Keyed off this world's own tick, so a fresh epoch gets its own grace
+    # period instead of being born into ground that is already dead. There is
+    # no floor: if nothing finds another income, the colony starves.
+    subsidy_ticks = 500_000        # ticks from full pasture to none
+
+    @property
+    def grazing_subsidy(self) -> float:
+        start = getattr(self, "subsidy_start_tick", None)
+        if start is None:
+            start = self.subsidy_start_tick = self.tick
+        elapsed = self.tick - start
+        return max(0.0, 1.0 - elapsed / self.subsidy_ticks)
+            # an unusually quiet box pays a bounded bonus
 
     def __init__(self, config: WorldConfig | None = None):
         super().__init__(config)
@@ -171,6 +202,15 @@ class SubstrateWorld(World):
         for _ in range(min(words, len(self._pages))):
             self._pages.pop()
         self.memory_used = max(0, self.memory_used - words)
+
+    def harvest(self, x: int, y: int) -> float:
+        """Grazing pays the withdrawn rate, not the historical one.
+
+        Without this the ramp would only slow refill, and the population would
+        simply graze the standing stock to zero and die on a cliff instead of a
+        gradient.
+        """
+        return super().harvest(x, y) * self.grazing_subsidy
 
     @property
     def memory_pressure(self) -> float:
@@ -323,7 +363,7 @@ class SubstrateWorld(World):
         phase = self.machine_band
         # Income is Odin's spare capacity. No floor: a busy enough box is a
         # famine, and a long enough famine is an extinction.
-        regen = self.regen_multiplier
+        regen = self.regen_multiplier * self.grazing_subsidy
         for y, row in enumerate(self.energy):
             for x in range(c.width):
                 if row[x] < c.tile_capacity:

@@ -392,6 +392,8 @@ class Habitat:
                 "spare": round(getattr(world, "machine_spare", 1.0), 4),
                 "spareBaseline": round(getattr(world, "machine_spare_baseline", 1.0), 4),
                 "regen": round(getattr(world, "regen_multiplier", 1.0), 3),
+                "subsidy": round(getattr(world, "grazing_subsidy", 1.0), 4),
+                "subsidyStart": getattr(world, "subsidy_start_tick", None),
                 "cpuUsageUsec": getattr(world, "cpu_usage_usec", 0),
             },
             "bus": {
