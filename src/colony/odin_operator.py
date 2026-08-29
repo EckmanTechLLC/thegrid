@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from .isa import ISA, NAME_TO_OP
-from .mutation import RandomMutator
+from .mutation import ExperimentalMutator
 
 
 class OdinMutator:
@@ -19,7 +19,16 @@ class OdinMutator:
         self.queue = queue
         self.rate = rate
         self.energy_cost = energy_cost
-        self.base = RandomMutator()
+        # The fallback must be the SAME operator the other arms run, or the
+        # comparison measures mutation rate instead of who authored the
+        # mutation. It was RandomMutator (point 0.008 / indel 0.02) against
+        # ExperimentalMutator elsewhere (0.012 / 0.06 plus bursts, inversions,
+        # duplications and block deletions) - roughly 3x the indel rate. That
+        # difference, not the model, is why the Odin arms carried the larger
+        # and steadier populations.
+        self.base = ExperimentalMutator()
+        if hasattr(self.base, "upgrade"):
+            self.base.upgrade()
         self.calls = 0
         self.accepted = 0
         self.failures = 0
