@@ -157,9 +157,13 @@ class Colony:
             return
         dx, dy = self.rng.choice([(0, -1), (1, 0), (0, 1), (-1, 0)])
         x, y = self.world.wrap(parent.x + dx, parent.y + dy)
+        if parent.energy <= self.CHILD_ENERGY:
+            self.world.release_memory(len(proposal))
+            return
         child = Organism(self._id(), proposal, x, y, parent.lineage,
-                           generation=parent.generation + 1, energy=16.0)
-        parent.energy -= 8.0
+                           generation=parent.generation + 1,
+                           energy=self.CHILD_ENERGY)
+        parent.energy -= self.CHILD_ENERGY
         parent.births += 1
         self.births += 1
         self.mutation_mechanisms.update(mutation_events)
@@ -179,6 +183,18 @@ class Colony:
                     self._copy_member(member, child, offspring_group)
 
     MAX_GROUP = 8   # a bound unit cannot exceed this; a bound on cost, not a design
+
+    # Reproduction is paid for, not subsidised. A child used to appear holding
+    # 16.0 while the parent was charged only 8.0 - eight units created from
+    # nothing on every birth, flat, regardless of genome length. Over one epoch
+    # colony seven minted 15.7 MILLION units that way, against 1,545 sitting on
+    # its entire map, and evolved a one-word genome to farm it: the shorter the
+    # program, the larger the subsidy relative to its cost. That faucet was far
+    # larger than the pasture, the task budget and salvage combined, so every
+    # scarcity result in this project was measured against a world that printed
+    # money. The child's energy now comes out of the parent, and a parent that
+    # cannot cover it does not reproduce.
+    CHILD_ENERGY = 16.0
 
     def members(self, group: int) -> list:
         return [o for o in self.organisms if o.group == group] if group >= 0 else []
@@ -221,7 +237,7 @@ class Colony:
         rather than subsidised: a group of identical programs costs exactly
         what the same programs cost unbound.
         """
-        if member.energy <= 8.0:
+        if member.energy <= self.CHILD_ENERGY:
             return
         genome = list(member.genome)
         if not self.world.request_memory(len(genome)):
@@ -239,9 +255,10 @@ class Colony:
         dx, dy = self.rng.choice([(0, -1), (1, 0), (0, 1), (-1, 0)])
         x, y = self.world.wrap(anchor.x + dx, anchor.y + dy)
         child = Organism(self._id(), proposal, x, y, member.lineage,
-                         generation=member.generation + 1, energy=16.0)
+                         generation=member.generation + 1,
+                         energy=self.CHILD_ENERGY)
         child.group = group
-        member.energy -= 8.0
+        member.energy -= self.CHILD_ENERGY
         member.births += 1
         self.births += 1
         self.group_births += 1
