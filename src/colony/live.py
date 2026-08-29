@@ -50,6 +50,12 @@ class Habitat:
         self.founders = founders if founders is not None else len(build_founder_palette())
         self.name = name or self.default_name(state_path)
         self.features = set(features or ())
+        # Set by the UI, acted on by the tick loop. The loop runs each batch of
+        # steps in a worker thread via asyncio.to_thread, so an HTTP handler is
+        # genuinely concurrent with stepping - retiring from the handler would
+        # swap self.colony out from under a running step. The loop performs it
+        # between batches instead, where nothing else holds the colony.
+        self.retire_requested: str | None = None
         self.seed = seed
         self.width = width
         self.height = height
@@ -581,6 +587,9 @@ async def run_habitat(habitat: Habitat, ticks_per_second: int) -> None:
                 habitat.step()
         # The VM can consume its full cgroup slice without blocking HTTP.
         await asyncio.to_thread(advance)
+        if habitat.retire_requested is not None:
+            reason, habitat.retire_requested = habitat.retire_requested, None
+            await asyncio.to_thread(habitat.retire_current_epoch, reason)
         habitat.latest = habitat.snapshot()
         if time.monotonic() - last_save >= 60:
             await asyncio.to_thread(habitat.save)
@@ -684,6 +693,18 @@ async def create_app(habitat: Habitat, ticks_per_second: int) -> web.Application
         )
 
     app.router.add_get("/api/history", history_summary)
+
+    async def retire_epoch(request: web.Request) -> web.Response:
+        """Queue an operator-directed retirement. POST only, never a GET."""
+        if habitat.retire_requested is not None:
+            return web.json_response({"queued": False, "reason": "already queued"},
+                                     status=409)
+        habitat.retire_requested = "operator-directed retirement from the viewer"
+        return web.json_response({"queued": True, "epoch": habitat.epoch,
+                                  "population": len(habitat.colony.organisms)},
+                                 status=202)
+
+    app.router.add_post("/api/retire", retire_epoch)
 
     async def start(app: web.Application) -> None:
         app["runner"] = asyncio.create_task(run_habitat(habitat, ticks_per_second))
