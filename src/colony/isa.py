@@ -41,6 +41,7 @@ class Op(IntEnum):
     POST = 33
     FETCH = 34
     LOCATE = 35
+    LINK = 36
 
 
 @dataclass(frozen=True)
@@ -110,6 +111,18 @@ ISA = [
     # other link in that chain already exists (input, post, fetch, sub, ifzero,
     # move); this is the one that was missing.
     Instruction("locate", 0.15, "read the current quadrant into A"),
+    # link: the unit that reproduces stops being the single program. Bound
+    # programs are copied together by whichever member replicates, so a member
+    # may drop its own alloc/copy/fork and spend that genome space on something
+    # else and still be inherited. Every major jump in complexity has been a
+    # change in what counts as an individual; nothing here could change it.
+    #
+    # Deliberately neutral to adopt: each member pays its own copy, so two
+    # identical programs bound together cost exactly what they cost apart.
+    # Drift can establish it before it pays for anything. Binding is also
+    # unilateral - you may attach yourself to a group that did not invite you,
+    # which makes freeloading reachable rather than designed out.
+    Instruction("link", 0.60, "bind to an adjacent organism; the group is copied as one"),
 ]
 
 NUM_OPS = len(ISA)
@@ -143,6 +156,7 @@ def build_founder_palette() -> list[list[int]]:
         # and adjacent, but nothing here is a working publish/consume circuit.
         [*core, Op.POST, Op.FETCH],
         [*core, Op.LOCATE, Op.FETCH],
+        [*core, Op.LINK],
         [*core, Op.INC, Op.PUSH, Op.ADD],
         [*core, Op.INPUT, Op.INPUT, Op.OUTPUT],
         [*core, Op.PEEK],

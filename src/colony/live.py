@@ -146,16 +146,20 @@ class Habitat:
                 colony.world.bus_written_at = [-1] * 16
                 colony.world.bus_writer = [-1] * 16
             for _c in ("published", "calls", "self_writes", "royalty_events",
-                       "bus_writes", "bus_reads", "publish_refused"):
+                       "bus_writes", "bus_reads", "publish_refused",
+                       "links", "group_births"):
                 if not hasattr(colony, _c):
                     setattr(colony, _c, 0)
             if not hasattr(colony, "royalties"):
                 colony.royalties = 0.0
             colony.tasks = TemporalTaskEnvironment()
+            colony.next_group = getattr(colony, "next_group", 1)
             colony.lifecycle_events = getattr(colony, "lifecycle_events", deque())
             for organism in colony.organisms:
                 if not hasattr(organism, "pending"):
                     organism.pending = []
+                if not hasattr(organism, "group"):
+                    organism.group = -1
                 if not hasattr(organism, "call_slot"):
                     organism.call_slot, organism.call_energy = -1, 0.0
                 for name in ("signals_sent", "structures_built", "neighbor_reads", "foreign_copies",
@@ -302,6 +306,7 @@ class Habitat:
         diversity = len({tuple(o.genome) for o in colony.organisms})
         average_genome_length = (sum(len(o.genome) for o in colony.organisms) / population
                                  if population else 0.0)
+        group_sizes = Counter(o.group for o in colony.organisms if o.group >= 0)
         active_signals = sum(value > 0 for row in world.signal_strength for value in row)
         built_tiles = sum(value > 0 for row in world.structures for value in row)
         biome_populations = Counter(world.biome(o.x, o.y) for o in colony.organisms)
@@ -395,6 +400,15 @@ class Habitat:
                 "subsidy": round(getattr(world, "grazing_subsidy", 1.0), 4),
                 "subsidyStart": getattr(world, "subsidy_start_tick", None),
                 "cpuUsageUsec": getattr(world, "cpu_usage_usec", 0),
+            },
+            "groups": {
+                # Only units of two or more count. A lone survivor still
+                # carrying a group id is not a compound individual.
+                "bound": sum(v for v in group_sizes.values() if v > 1),
+                "count": sum(1 for v in group_sizes.values() if v > 1),
+                "largest": max(list(group_sizes.values()) or [0]),
+                "links": getattr(colony, "links", 0),
+                "groupBirths": getattr(colony, "group_births", 0),
             },
             "bus": {
                 "words": list(getattr(world, "bus", [])),

@@ -44,6 +44,9 @@ class Colony:
         self.self_writes = 0    # in-life genome edits (Lamarckian: COPY reads genome)
         self.royalties = 0.0    # energy transferred to publishers of useful routines
         self.royalty_events = 0
+        self.next_group = 1
+        self.links = 0          # successful bindings
+        self.group_births = 0   # members copied by a groupmate's replication
         self.lifecycle_events = deque()
         genomes = founder_genomes or [build_ancestor() for _ in range(founders)]
         if len(genomes) < founders:
@@ -138,6 +141,87 @@ class Colony:
         self.lifecycle_events.append({"kind": "birth", "tick": self.world.tick,
                                       "organism": child, "parent": parent,
                                       "mutations": mutation_events})
+        # The group is the unit that reproduces. Every other bound member is
+        # copied alongside, into the child's new group - so a member carrying no
+        # replication machinery of its own is still inherited.
+        if parent.group >= 0:
+            others = [o for o in self.members(parent.group) if o is not parent]
+            if others:
+                child.group = offspring_group = self.next_group
+                self.next_group += 1
+                for member in others:
+                    self._copy_member(member, child, offspring_group)
+
+    MAX_GROUP = 8   # a bound unit cannot exceed this; a bound on cost, not a design
+
+    def members(self, group: int) -> list:
+        return [o for o in self.organisms if o.group == group] if group >= 0 else []
+
+    def _dissolve_if_alone(self, organism) -> None:
+        """A unit of one is not a unit. Without this, an organism whose
+        groupmates have died stays flagged as bound, and since two grouped
+        organisms are never merged, every survivor eventually ends up in a
+        dead singleton and linking stops working altogether."""
+        if organism.group >= 0 and len(self.members(organism.group)) < 2:
+            organism.group = -1
+
+    def link(self, initiator, other) -> bool:
+        """Bind two programs into one unit. Unilateral: consent is not required."""
+        self._dissolve_if_alone(initiator)
+        self._dissolve_if_alone(other)
+        a, b = initiator.group, other.group
+        if a >= 0 and a == b:
+            return False
+        if a >= 0 and b >= 0:
+            return False                      # merging two groups is not offered
+        if b >= 0:                            # attach to the neighbour's group
+            if len(self.members(b)) >= self.MAX_GROUP:
+                return False
+            initiator.group = b
+        elif a >= 0:                          # pull the neighbour into mine
+            if len(self.members(a)) >= self.MAX_GROUP:
+                return False
+            other.group = a
+        else:
+            initiator.group = other.group = self.next_group
+            self.next_group += 1
+        self.links += 1
+        return True
+
+    def _copy_member(self, member, anchor, group: int) -> None:
+        """Reproduce one bound member off a groupmate's replication event.
+
+        The member pays for its own copy, which is what keeps binding neutral
+        rather than subsidised: a group of identical programs costs exactly
+        what the same programs cost unbound.
+        """
+        if member.energy <= 8.0:
+            return
+        genome = list(member.genome)
+        if not self.world.request_memory(len(genome)):
+            return
+        proposal = self.mutator.mutate_at_birth(genome, self.rng)
+        delta = len(proposal) - len(genome)
+        if delta > 0 and not self.world.request_memory(delta):
+            self.world.release_memory(len(genome))
+            return
+        if delta < 0:
+            self.world.release_memory(-delta)
+        if not proposal:
+            self.world.release_memory(len(proposal))
+            return
+        dx, dy = self.rng.choice([(0, -1), (1, 0), (0, 1), (-1, 0)])
+        x, y = self.world.wrap(anchor.x + dx, anchor.y + dy)
+        child = Organism(self._id(), proposal, x, y, member.lineage,
+                         generation=member.generation + 1, energy=16.0)
+        child.group = group
+        member.energy -= 8.0
+        member.births += 1
+        self.births += 1
+        self.group_births += 1
+        self.organisms.append(child)
+        self.lifecycle_events.append({"kind": "birth", "tick": self.world.tick,
+                                      "organism": child, "parent": member})
 
     def organism_by_id(self, oid: int):
         for organism in self.organisms:
