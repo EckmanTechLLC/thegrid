@@ -16,7 +16,7 @@ class Colony:
     def __init__(self, world: World | None = None, mutator=None, tasks=None,
                  seed: int = 42, founders: int = 6, max_age: int = 2400,
                  founder_genomes: list[list[int]] | None = None,
-                 founder_copies: int = 1):
+                 founder_copies: int = 1, features: set | None = None):
         self.world = world or World()
         self.mutator = mutator or RandomMutator()
         self.tasks = tasks or TaskEnvironment()
@@ -44,6 +44,14 @@ class Colony:
         self.self_writes = 0    # in-life genome edits (Lamarckian: COPY reads genome)
         self.royalties = 0.0    # energy transferred to publishers of useful routines
         self.royalty_events = 0
+        # Which frontier mechanics this colony has. A disabled op executes as
+        # a nop rather than being absent, so opcode indices and glyphs stay
+        # identical across every arm and genomes remain comparable.
+        self.features = set(features or ())
+        self.burns = 0
+        self.bounties_offered = 0
+        self.macros_defined = 0
+        self.macro_runs = 0
         self.next_group = 1
         self.links = 0          # successful bindings
         self.group_births = 0   # members copied by a groupmate's replication
@@ -107,7 +115,25 @@ class Colony:
             else:
                 survivors.append(organism)
         self.organisms = survivors
+        if "bounty" in self.features:
+            self.expire_bounties()
         self.world.step()
+        if "burn" in self.features:
+            # Real cycles, spent after the tick's bookkeeping so the cost lands
+            # on this machine rather than on the colony's own accounting.
+            self.world.spend_cycles()
+
+    def expire_bounties(self) -> None:
+        """Refund escrow nobody claimed. An offerer who died forfeits it."""
+        world = self.world
+        for address, bounty in enumerate(world.bounties):
+            if bounty is None or world.tick - bounty["tick"] < world.bounty_ttl:
+                continue
+            world.bounties[address] = None
+            world.bounty_expired += 1
+            owner = self.organism_by_id(bounty["owner"])
+            if owner is not None:
+                owner.energy += bounty["escrow"]
 
     def fork(self, parent: Organism) -> None:
         if parent.child is None or parent.copy_index != len(parent.genome):

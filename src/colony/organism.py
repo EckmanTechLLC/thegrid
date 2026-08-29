@@ -308,8 +308,35 @@ class Organism:
                 self.forecast_stored_mask |= 1 << slot
         elif op == Op.POST:
             colony.world.bus_post(self.b, self.a, writer=self.id)
+            if "bounty" in colony.features:
+                won = colony.world.claim_bounty(self.b, self.a, self.id)
+                if won:
+                    self.energy += won
+                    self.bounties_won = getattr(self, "bounties_won", 0) + 1
             self.bus_writes = getattr(self, "bus_writes", 0) + 1
             colony.bus_writes = getattr(colony, "bus_writes", 0) + 1
+        elif op == Op.BURN and "burn" in colony.features:
+            colony.world.burn_request()
+            self.burns = getattr(self, "burns", 0) + 1
+            colony.burns = getattr(colony, "burns", 0) + 1
+        elif op == Op.OFFER and "bounty" in colony.features:
+            escrow = min(float(self.a), max(0.0, self.energy - 1.0))
+            if escrow > 0 and colony.world.offer_bounty(self.b, self.c, escrow, self.id):
+                self.energy -= escrow
+                colony.bounties_offered = getattr(colony, "bounties_offered", 0) + 1
+        elif op == Op.DEFINE and "macro" in colony.features:
+            if len(self.genome) >= 4:
+                length = 4 + (self.c % 5)
+                start = self.b % len(self.genome)
+                words = [self.genome[(start + k) % len(self.genome)]
+                         for k in range(min(length, len(self.genome)))]
+                if colony.world.define_macro(self.a, words, owner=self.id):
+                    colony.macros_defined = getattr(colony, "macros_defined", 0) + 1
+        elif Op.MACRO0 <= op <= Op.MACRO7 and "macro" in colony.features:
+            body = colony.world.run_macro(int(op) - int(Op.MACRO0))
+            if body and len(self.pending) < 24:
+                self.pending.extend(body)
+                colony.macro_runs = getattr(colony, "macro_runs", 0) + 1
         elif op == Op.LINK:
             other = colony.neighbor(self)
             if other is not None:

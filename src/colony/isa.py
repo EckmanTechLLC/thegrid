@@ -42,6 +42,17 @@ class Op(IntEnum):
     FETCH = 34
     LOCATE = 35
     LINK = 36
+    BURN = 37
+    OFFER = 38
+    DEFINE = 39
+    MACRO0 = 40
+    MACRO1 = 41
+    MACRO2 = 42
+    MACRO3 = 43
+    MACRO4 = 44
+    MACRO5 = 45
+    MACRO6 = 46
+    MACRO7 = 47
 
 
 @dataclass(frozen=True)
@@ -123,6 +134,26 @@ ISA = [
     # unilateral - you may attach yourself to a group that did not invite you,
     # which makes freeloading reachable rather than designed out.
     Instruction("link", 0.60, "bind to an adjacent organism; the group is copied as one"),
+    # burn: spend real CPU. The colony already senses this machine's heat and
+    # spare capacity; nothing let it CHANGE them. Burning cycles warms the chip
+    # and eats scheduler time, which raises the cost of every instruction and
+    # lowers everyone's income - including the burner's. Niche construction on
+    # real silicon, and a weapon for anything less dependent on regeneration
+    # than its neighbours.
+    Instruction("burn", 0.50, "spend real CPU cycles on this machine"),
+    # offer: escrow A energy at bus address B for the value in C. Whoever posts
+    # that value to that address collects. Avida's ceiling was its authored task
+    # list; this lets the population decide what is worth paying for. Pure
+    # transfer - escrow leaves the offerer and reaches the claimant or nobody.
+    Instruction("offer", 0.40, "escrow A energy at address B for the value in C"),
+    # define: name an abstraction. publish/call share code but a call needs its
+    # slot number in a register at the moment of use; a macro is ONE genome word,
+    # so mutation can wire it anywhere the way it wires any other opcode. The
+    # instruction set stays fixed at 48 - what eight of those opcodes MEAN is
+    # authored by the population rather than by me.
+    Instruction("define", 1.00, "define macro slot A from own genome at B, length 4-8"),
+    *[Instruction(f"macro{i}", 0.20, f"run macro slot {i}, if anything has defined it")
+      for i in range(8)],
 ]
 
 NUM_OPS = len(ISA)
@@ -157,6 +188,9 @@ def build_founder_palette() -> list[list[int]]:
         [*core, Op.POST, Op.FETCH],
         [*core, Op.LOCATE, Op.FETCH],
         [*core, Op.LINK],
+        [*core, Op.BURN],
+        [*core, Op.OFFER],
+        [*core, Op.DEFINE, Op.MACRO0],
         [*core, Op.INC, Op.PUSH, Op.ADD],
         [*core, Op.INPUT, Op.INPUT, Op.OUTPUT],
         [*core, Op.PEEK],
