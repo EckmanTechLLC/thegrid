@@ -372,6 +372,7 @@ class Habitat:
                 # the storms actually fire on.
                 "source": "odin-thermal" if hasattr(world, "machine_band") else "simulated",
                 "band": getattr(world, "machine_band", None),
+                "subsidy": round(getattr(world, "grazing_subsidy", 1.0), 4),
                 "baselineC": round(getattr(world, "machine_baseline", 0.0), 2),
                 "heatFastC": round(getattr(world, "machine_heat_fast", 0.0), 2),
                 "heatRawC": round(world.heat, 2),

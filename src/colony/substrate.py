@@ -86,6 +86,41 @@ class SubstrateWorld(World):
     machine_memory_band = 0.50     # cgroup pressure that flips the memory bit
     storm_refractory = 1000        # ticks a storm may not re-fire within
 
+    # -- the grazing subsidy is being withdrawn -----------------------------
+    # Nothing complex ever evolved here because nothing ever required it. A
+    # 12-op grazing loop is a complete answer to this world, so evolution kept
+    # returning one. Tiles were a pasture: free energy, renewed forever, and
+    # computation was optional side income nobody needed.
+    #
+    # Tile yield now decays linearly to zero and does not come back. What is
+    # left afterwards is a machine economy: energy enters only as work the
+    # system sets (tasks), and moves only by being called by another program
+    # (royalties) or by reclaiming what died (salvage). Work, service,
+    # recycling. No field.
+    #
+    # Keyed off this world's own tick, so a fresh epoch gets its own grace
+    # period instead of being born into ground that is already dead. There is
+    # no floor: if nothing finds another income, the colony starves.
+    subsidy_ticks = 500_000        # ticks from full pasture to none
+
+    @property
+    def grazing_subsidy(self) -> float:
+        start = getattr(self, "subsidy_start_tick", None)
+        if start is None:
+            start = self.subsidy_start_tick = self.tick
+        elapsed = self.tick - start
+        return max(0.0, 1.0 - elapsed / self.subsidy_ticks)
+
+    def harvest(self, x: int, y: int) -> float:
+        """Grazing pays the withdrawn rate, not the historical one.
+
+        Without this the ramp would only slow refill, and the population would
+        graze the standing stock to zero and die on a cliff instead of a
+        gradient.
+        """
+        return super().harvest(x, y) * self.grazing_subsidy
+
+
     def __init__(self, config: WorldConfig | None = None):
         super().__init__(config)
         self._pages: list[bytearray] = []
@@ -263,6 +298,7 @@ class SubstrateWorld(World):
         self.apply_resource_storm()
         # The favoured biome tracks the machine, not a 2000-tick carousel.
         phase = self.machine_band
+        subsidy = self.grazing_subsidy
         for y, row in enumerate(self.energy):
             for x in range(c.width):
                 if row[x] < c.tile_capacity:
@@ -270,7 +306,9 @@ class SubstrateWorld(World):
                     climate = 1.8 if biome == phase else 0.55
                     base = (1.25, 0.65, 0.40, 0.75)[biome]
                     construction = self.structures[y][x] * 0.003 * (4.0 if biome == 2 else 0.6)
-                    row[x] = min(c.tile_capacity, row[x] + c.tile_regen * climate * base + construction)
+                    row[x] = min(c.tile_capacity,
+                                 row[x] + c.tile_regen * climate * base * subsidy
+                                 + construction)
                 if self.signal_strength[y][x] > 0:
                     self.signal_strength[y][x] -= 1
                     if self.signal_strength[y][x] == 0:
