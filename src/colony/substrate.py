@@ -101,7 +101,7 @@ class SubstrateWorld(World):
     cpu_alpha = 0.002              # EMA rate for the spare-capacity baseline
     cpu_sample_interval = 0.5      # seconds between /proc/stat reads
     regen_exponent = 2.0           # how sharply income follows spare capacity
-    regen_ceiling = 1.5
+    regen_ceiling = 1.5            # an unusually quiet box pays a bounded bonus
 
     # -- the grazing subsidy is being withdrawn -----------------------------
     # Nothing complex ever evolved here because nothing ever required it. A
@@ -132,7 +132,6 @@ class SubstrateWorld(World):
             start = self.subsidy_start_tick = self.tick
         elapsed = self.tick - start
         return max(0.0, 1.0 - elapsed / self.subsidy_ticks)
-            # an unusually quiet box pays a bounded bonus
 
     def __init__(self, config: WorldConfig | None = None):
         super().__init__(config)

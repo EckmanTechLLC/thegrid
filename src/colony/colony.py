@@ -59,6 +59,12 @@ class Colony:
         genomes = founder_genomes or [build_ancestor() for _ in range(founders)]
         if len(genomes) < founders:
             raise ValueError("founder_genomes must contain at least one genome per founder")
+        if founder_genomes is not None and len(genomes) > founders:
+            # Silent truncation cost this project eight founders. Appending to
+            # the palette must never again quietly drop the tail of it.
+            raise ValueError(
+                f"founder_genomes has {len(genomes)} entries but only {founders} "
+                f"would be seeded; raise founders or trim the palette")
         # Seed distinct, viable niches. Random placement on a patchy field can
         # erase most founder diversity before evolution even begins.
         positions = [(x, y) for y in range(self.world.config.height)

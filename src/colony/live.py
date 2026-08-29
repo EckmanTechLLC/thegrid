@@ -37,15 +37,20 @@ class Habitat:
         suffix = stem.split("colony")[-1] if "colony" in stem else ""
         return "Colony " + cls.ORDINALS.get(suffix, suffix or "One")
 
-    def __init__(self, state_path: Path, seed: int = 42, founders: int = 13,
+    def __init__(self, state_path: Path, seed: int = 42, founders: int | None = None,
                  physical: bool = True, mutator_kind: str = "odin",
                  width: int = 48, height: int = 48, name: str | None = None,
                  features: set | None = None):
         self.state_path = state_path
+        # Derived, never a constant. It was 13 against a palette that had grown
+        # to 21, so Colony.__init__ silently used genomes[0:13] and the last
+        # eight founders never entered the world at all - including the only
+        # one seeding input/output task machinery, and the seeds for offer and
+        # define, which are the entire point of colonies five and six.
+        self.founders = founders if founders is not None else len(build_founder_palette())
         self.name = name or self.default_name(state_path)
         self.features = set(features or ())
         self.seed = seed
-        self.founders = founders
         self.width = width
         self.height = height
         self.physical = physical
@@ -84,7 +89,7 @@ class Habitat:
         return Colony(world, mutator, TemporalTaskEnvironment(),
                       seed=self.seed, founders=self.founders,
                       founder_genomes=build_founder_palette(),
-                      founder_copies=4 if self.physical else 1,
+                      founder_copies=2 if self.physical else 1,
                       features=self.features)
 
     def _load_or_create(self) -> Colony:
