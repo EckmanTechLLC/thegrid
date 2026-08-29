@@ -64,31 +64,6 @@ class Habitat:
         self._last_storm_count = getattr(self.colony.world, "storm_count", 0)
         self.latest = self.snapshot()
 
-    # A run that has stopped changing is a fixed point, and a machine kills a
-    # process that stops making progress rather than letting it hold a slot
-    # forever. Colony one held the same 13-op dominant genome for twenty days
-    # and 12,000 generations without solving anything new. Measured on turnover
-    # of the dominant lineage only: it says nothing about what a colony should
-    # become, just that a converged one is finished.
-    stagnation_ticks = 500_000
-
-    def check_stagnation(self, genome: list[int], tick: int) -> None:
-        identity = genome_id(tuple(genome)) if genome else None
-        if identity != getattr(self, "_dominant_id", None):
-            self._dominant_id, self._dominant_since = identity, tick
-            return
-        since = getattr(self, "_dominant_since", None)
-        if since is None:
-            self._dominant_since = tick
-            return
-        if tick - since >= self.stagnation_ticks:
-            self.events.append({
-                "tick": tick,
-                "text": f"stagnation: one lineage held for {tick - since:,} ticks",
-            })
-            self.retire_current_epoch(
-                reason=f"stagnation: dominant lineage unchanged for {tick - since} ticks")
-
     def _new_colony(self) -> Colony:
         if self.physical:
             world = SubstrateWorld(WorldConfig(width=self.width, height=self.height,
@@ -289,11 +264,6 @@ class Habitat:
             self._last_tasks.clear()
             self._last_storm_count = 0
         self.colony.step()
-        if self.colony.world.tick % 500 == 0:
-            dominant, _ = self.colony.dominant_genome()
-            self.check_stagnation(dominant, self.colony.world.tick)
-            if not self.colony.organisms:
-                return
         storm_count = getattr(self.colony.world, "storm_count", 0)
         if storm_count > self._last_storm_count:
             labels = ("NW", "NE", "SW", "SE")
@@ -386,8 +356,6 @@ class Habitat:
             "genomeGlyphs": "".join(genome_id(o.genome)[0] for o in colony.organisms),
             "strains": [strains.get(i, 0) for i in range(self.founders)],
             "dominant": encode_genome(genome), "carriers": carriers,
-            "dominantSince": getattr(self, "_dominant_since", None),
-            "stagnationTicks": self.stagnation_ticks,
             "isa": [item.name for item in ISA],
             "ancestor": encode_genome(build_ancestor()),
             "tasks": colony.task_firsts,
