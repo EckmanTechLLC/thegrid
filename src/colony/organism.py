@@ -30,6 +30,7 @@ class Organism:
     last_inputs: tuple[int, int] = (0, 0)
     input_index: int = 0
     signals_sent: int = 0
+    group: int = -1
     bus_writes: int = 0
     bus_reads: int = 0
     signals_heard: int = 0
@@ -309,6 +310,10 @@ class Organism:
             colony.world.bus_post(self.b, self.a, writer=self.id)
             self.bus_writes = getattr(self, "bus_writes", 0) + 1
             colony.bus_writes = getattr(colony, "bus_writes", 0) + 1
+        elif op == Op.LINK:
+            other = colony.neighbor(self)
+            if other is not None:
+                colony.link(self, other)
         elif op == Op.LOCATE:
             self.a = colony.world.biome(self.x, self.y)
         elif op == Op.FETCH:
