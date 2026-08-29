@@ -298,6 +298,13 @@ class Habitat:
         diversity = len({tuple(o.genome) for o in colony.organisms})
         average_genome_length = (sum(len(o.genome) for o in colony.organisms) / population
                                  if population else 0.0)
+        # Complexity measured as capability, not size. A genome padded with
+        # thirty harvests is not complex; one carrying nand, link or fetch has
+        # something the ancestor did not. Counting DISTINCT opcodes outside the
+        # ancestor's own set avoids rewarding bloat and needs no threshold.
+        ancestor_ops = set(build_ancestor())
+        novel = sorted(len(set(o.genome) - ancestor_ops) for o in colony.organisms)
+        novel_hist = Counter(novel)
         group_sizes = Counter(o.group for o in colony.organisms if o.group >= 0)
         active_signals = sum(value > 0 for row in world.signal_strength for value in row)
         built_tiles = sum(value > 0 for row in world.structures for value in row)
@@ -385,6 +392,14 @@ class Habitat:
                 "triggerC": getattr(world, "machine_trigger_delta", None),
                 "warning": (getattr(world, "machine_excess", 0.0)
                             >= getattr(world, "machine_warning_delta", 1e9)),
+            },
+            "complexity": {
+                "median": novel[len(novel) // 2] if novel else 0,
+                "max": novel[-1] if novel else 0,
+                "mean": round(sum(novel) / len(novel), 2) if novel else 0,
+                # counts of organisms carrying 0,1,2,... novel opcodes
+                "histogram": [novel_hist.get(i, 0)
+                              for i in range(((novel[-1] if novel else 0) + 1))],
             },
             "groups": {
                 # Only units of two or more count. A lone survivor still
