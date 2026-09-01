@@ -10,8 +10,10 @@ import json
 import os
 import pickle
 import shutil
+import urllib.request
 import signal
 import time
+import random
 from collections import Counter, deque
 from pathlib import Path
 
@@ -19,7 +21,7 @@ from aiohttp import web
 
 from .colony import Colony
 from .history import LineageHistory, genome_id
-from .isa import ISA, Op, build_ancestor, build_founder_palette
+from .isa import ISA, NAME_TO_OP, Op, build_ancestor, build_founder_palette
 from .odin_operator import OdinMutator
 from .record import ALPHABET, encode_energy, encode_genome, encode_positions
 from .tasks import TemporalTaskEnvironment
@@ -40,7 +42,7 @@ class Habitat:
     def __init__(self, state_path: Path, seed: int = 42, founders: int | None = None,
                  physical: bool = True, mutator_kind: str = "odin",
                  width: int = 48, height: int = 48, name: str | None = None,
-                 features: set | None = None):
+                 features: set | None = None, peers: list | None = None):
         self.state_path = state_path
         # Derived, never a constant. It was 13 against a palette that had grown
         # to 21, so Colony.__init__ silently used genomes[0:13] and the last
@@ -56,6 +58,11 @@ class Habitat:
         # swap self.colony out from under a running step. The loop performs it
         # between batches instead, where nothing else holds the colony.
         self.retire_requested: str | None = None
+        # Peers this colony may be recolonised from when it dies. Empty means
+        # the historical behaviour: reseed from the ancestral founder palette.
+        self.peers: list[str] = list(peers or ())
+        self.last_donor: str | None = None
+        self._migration_rng = random.Random()
         self.seed = seed
         self.width = width
         self.height = height
@@ -77,7 +84,7 @@ class Habitat:
         self._last_storm_count = getattr(self.colony.world, "storm_count", 0)
         self.latest = self.snapshot()
 
-    def _new_colony(self) -> Colony:
+    def _new_colony(self, founder_genomes: list | None = None) -> Colony:
         if self.physical:
             world = SubstrateWorld(WorldConfig(width=self.width, height=self.height,
                                                seed=self.seed))
@@ -93,10 +100,54 @@ class Habitat:
                                       seed=self.seed))
             mutator = RandomMutator()
         return Colony(world, mutator, TemporalTaskEnvironment(),
-                      seed=self.seed, founders=self.founders,
-                      founder_genomes=build_founder_palette(),
-                      founder_copies=2 if self.physical else 1,
+                      seed=self.seed,
+                      founders=(len(founder_genomes) if founder_genomes
+                                else self.founders),
+                      founder_genomes=founder_genomes or build_founder_palette(),
+                      founder_copies=(1 if founder_genomes
+                                      else (2 if self.physical else 1)),
                       features=self.features)
+
+    def _recolonise(self) -> Colony | None:
+        """Seed from a living peer instead of from ancestors.
+
+        Every colony here burns 7-15 epochs a day, and each extinction threw
+        away everything the epoch had found: colony six reached generation 496
+        and solved five tasks, then restarted from the same 21 ancestral
+        founders as though it had never existed. Nothing this fleet discovered
+        survived its discoverer. An extinct island is now recolonised by
+        whatever is alive elsewhere.
+
+        The arrival is deliberately hostile. Feature sets differ per colony, so
+        a lineage that leaned on macro opcodes lands where those eight are
+        inert nops, and a bounty economy arrives where offer does nothing. The
+        migrant carries instructions that no longer mean what they meant.
+        """
+        candidates = [p for p in self.peers if p != self.last_donor] or list(self.peers)
+        self._migration_rng.shuffle(candidates)
+        for peer in candidates:
+            try:
+                with urllib.request.urlopen(
+                        f"http://{peer}/api/emigrants?n=24", timeout=4) as response:
+                    payload = json.load(response)
+            except Exception:
+                continue
+            genomes = [[NAME_TO_OP[n] for n in g if n in NAME_TO_OP]
+                       for g in payload.get("genomes", [])]
+            genomes = [g for g in genomes if len(g) >= 2]
+            if len(genomes) < 4:            # a dying peer is not a founder pool
+                continue
+            colony = self._new_colony(founder_genomes=genomes)
+            if not colony.organisms:
+                continue
+            self.last_donor = peer
+            self.events.append({
+                "tick": 0,
+                "text": f"recolonised from {payload.get('colony', peer)} "
+                        f"epoch {payload.get('epoch')} ({len(genomes)} genomes)",
+            })
+            return colony
+        return None
 
     def _load_or_create(self) -> Colony:
         try:
@@ -282,7 +333,9 @@ class Habitat:
             except (AttributeError, OSError):
                 pass
             self.seed += 1
-            replacement = self._new_colony()
+            replacement = self._recolonise() if self.peers else None
+            if replacement is None:
+                replacement = self._new_colony()
             if not replacement.organisms:
                 # Persist the empty boundary, then let systemd give the next
                 # epoch a clean address space. This is recovery, not revival.
@@ -686,6 +739,31 @@ async def create_app(habitat: Habitat, ticks_per_second: int) -> web.Application
 
     app.router.add_post("/api/retire", retire_epoch)
 
+    async def emigrants(request: web.Request) -> web.Response:
+        """Living genomes, as instruction names, for a dead colony to reseed from.
+
+        Names rather than opcodes so a peer is never at the mercy of index
+        drift between trees, and a uniform sample rather than the fittest:
+        choosing who emigrates would be me imposing a fitness criterion. The
+        only filter is being alive, which the world already applies.
+        """
+        colony = habitat.colony
+        try:
+            limit = max(1, min(64, int(request.query.get("n", "24"))))
+        except ValueError:
+            limit = 24
+        living = colony.organisms
+        if len(living) > limit:
+            living = habitat._migration_rng.sample(living, limit)
+        return web.json_response({
+            "colony": habitat.name, "epoch": habitat.epoch,
+            "tick": colony.world.tick, "population": len(colony.organisms),
+            "genomes": [[ISA[w].name for w in o.genome if 0 <= w < len(ISA)]
+                        for o in living],
+        })
+
+    app.router.add_get("/api/emigrants", emigrants)
+
     async def start(app: web.Application) -> None:
         app["runner"] = asyncio.create_task(run_habitat(habitat, ticks_per_second))
         def restart_on_failure(task: asyncio.Task) -> None:
@@ -720,11 +798,15 @@ def main() -> None:
                         help="display name; defaults to the state directory")
     parser.add_argument("--features", default="",
                         help="comma-separated: burn,bounty,macro")
+    parser.add_argument("--peers", default="",
+                        help="comma-separated host:port to recolonise from on "
+                             "extinction; empty reseeds from ancestors")
     parser.add_argument("--state", type=Path,
                         default=Path.home() / ".local/state/thegrid/colony.pkl")
     args = parser.parse_args()
     habitat = Habitat(args.state, mutator_kind=args.mutator, name=args.name,
-                      features={f.strip() for f in args.features.split(",") if f.strip()})
+                      features={f.strip() for f in args.features.split(",") if f.strip()},
+                      peers=[p.strip() for p in args.peers.split(",") if p.strip()])
     if args.retire_current_epoch:
         habitat.retire_current_epoch()
         habitat.history.close()
