@@ -48,6 +48,9 @@ class Colony:
         # identical across every arm and genomes remain comparable.
         self.features = set(features or ())
         self.burns = 0
+        self.steals = 0
+        self.stolen = 0.0
+        self.corruptions = 0
         self.bounties_offered = 0
         self.macros_defined = 0
         self.macro_runs = 0

@@ -53,6 +53,8 @@ class Op(IntEnum):
     MACRO5 = 45
     MACRO6 = 46
     MACRO7 = 47
+    STEAL = 48
+    CORRUPT = 49
 
 
 @dataclass(frozen=True)
@@ -154,6 +156,27 @@ ISA = [
     Instruction("define", 1.00, "define macro slot A from own genome at B, length 4-8"),
     *[Instruction(f"macro{i}", 0.20, f"run macro slot {i}, if anything has defined it")
       for i in range(8)],
+    # steal/corrupt: the first things one organism can do TO another against its
+    # will. Everything until now was cooperative or neutral - read a neighbour,
+    # copy it, pay it, call its code, bind to it - so nothing ever needed
+    # defending and every strategy had a stable cheapest answer that evolution
+    # found once and then coasted on forever. Physics is static; it demands a
+    # solution once. Other organisms adapt back, which is the only force in this
+    # world that can keep a problem from being solved.
+    #
+    # Neither is rewarded. They are capabilities, priced like any other, and
+    # selection decides whether predation pays. Both need an adjacent target.
+    #
+    # steal is a strict transfer - the thief gains exactly what the victim loses,
+    # no minting, that mistake is not being repeated - which makes hoarding
+    # dangerous, movement valuable, and peek worth doing before you settle.
+    Instruction("steal", 0.70, "take energy from an adjacent organism"),
+    # corrupt is write aimed at somebody else: memory corruption across a
+    # process boundary. It destroys structure rather than moving energy, and
+    # the only defence reachable from this ISA is redundancy - which
+    # segment_duplication already produces, and which has had no reason to
+    # persist until now.
+    Instruction("corrupt", 0.90, "write A into an adjacent organism's genome at B"),
 ]
 
 NUM_OPS = len(ISA)
@@ -191,6 +214,8 @@ def build_founder_palette() -> list[list[int]]:
         [*core, Op.BURN],
         [*core, Op.OFFER],
         [*core, Op.DEFINE, Op.MACRO0],
+        [*core, Op.STEAL],
+        [*core, Op.CORRUPT],
         [*core, Op.INC, Op.PUSH, Op.ADD],
         [*core, Op.INPUT, Op.INPUT, Op.OUTPUT],
         [*core, Op.PEEK],
