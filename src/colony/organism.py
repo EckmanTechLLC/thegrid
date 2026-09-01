@@ -31,6 +31,10 @@ class Organism:
     input_index: int = 0
     signals_sent: int = 0
     group: int = -1
+    stolen: float = 0.0        # energy taken from others
+    robbed: float = 0.0        # energy taken from me
+    corruptions: int = 0       # genome words I overwrote in others
+    corrupted: int = 0         # genome words others overwrote in me
     bus_writes: int = 0
     bus_reads: int = 0
     signals_heard: int = 0
@@ -90,6 +94,10 @@ class Organism:
             "weather_cue_signals": getattr(self, "weather_cue_signals", 0),
             "experimental_ops": dict(getattr(self, "experimental_ops", {})),
             "salvaged": round(getattr(self, "salvaged", 0.0), 2),
+            "stolen": round(getattr(self, "stolen", 0.0), 2),
+            "robbed": round(getattr(self, "robbed", 0.0), 2),
+            "corruptions": getattr(self, "corruptions", 0),
+            "corrupted": getattr(self, "corrupted", 0),
         }
 
     def execute(self, colony) -> None:
@@ -337,6 +345,23 @@ class Organism:
             if body and len(self.pending) < 24:
                 self.pending.extend(body)
                 colony.macro_runs = getattr(colony, "macro_runs", 0) + 1
+        elif op == Op.STEAL and "predation" in colony.features:
+            victim = colony.neighbor(self)
+            if victim is not None and victim.energy > 1.0:
+                taken = min(4.0, victim.energy * 0.25)
+                victim.energy -= taken
+                self.energy += taken          # strict transfer, nothing minted
+                self.stolen = getattr(self, "stolen", 0.0) + taken
+                victim.robbed = getattr(victim, "robbed", 0.0) + taken
+                colony.steals = getattr(colony, "steals", 0) + 1
+                colony.stolen = getattr(colony, "stolen", 0.0) + taken
+        elif op == Op.CORRUPT and "predation" in colony.features:
+            victim = colony.neighbor(self)
+            if victim is not None and victim.genome:
+                victim.genome[self.b % len(victim.genome)] = self.a % NUM_OPS
+                self.corruptions = getattr(self, "corruptions", 0) + 1
+                victim.corrupted = getattr(victim, "corrupted", 0) + 1
+                colony.corruptions = getattr(colony, "corruptions", 0) + 1
         elif op == Op.LINK:
             other = colony.neighbor(self)
             if other is not None:

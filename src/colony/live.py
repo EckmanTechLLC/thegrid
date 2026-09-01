@@ -219,7 +219,8 @@ class Habitat:
                 colony.royalties = 0.0
             colony.tasks = TemporalTaskEnvironment()
             colony.features = set(self.features)
-            for _c in ("burns", "bounties_offered", "macros_defined", "macro_runs"):
+            for _c in ("burns", "bounties_offered", "macros_defined", "macro_runs",
+                       "steals", "corruptions"):
                 if not hasattr(colony, _c):
                     setattr(colony, _c, 0)
             if not hasattr(colony.world, "bounties"):
@@ -241,6 +242,10 @@ class Habitat:
                     organism.pending = []
                 if not hasattr(organism, "group"):
                     organism.group = -1
+                for _f, _v in (("stolen", 0.0), ("robbed", 0.0),
+                               ("corruptions", 0), ("corrupted", 0)):
+                    if not hasattr(organism, _f):
+                        setattr(organism, _f, _v)
                 if not hasattr(organism, "call_slot"):
                     organism.call_slot, organism.call_energy = -1, 0.0
                 for name in ("signals_sent", "structures_built", "neighbor_reads", "foreign_copies",
@@ -505,6 +510,17 @@ class Habitat:
                 "macroRuns": getattr(colony, "macro_runs", 0),
                 "macroSlots": [len(m) for m in getattr(world, "macros", [])],
                 "macroUses": list(getattr(world, "macro_uses", [])),
+            },
+            "predation": {
+                "steals": getattr(colony, "steals", 0),
+                "stolen": round(getattr(colony, "stolen", 0.0), 1),
+                "corruptions": getattr(colony, "corruptions", 0),
+                "carriers": sum(1 for o in colony.organisms
+                                if any(w in (int(Op.STEAL), int(Op.CORRUPT))
+                                       for w in o.genome)),
+                "victims": sum(1 for o in colony.organisms
+                               if getattr(o, "robbed", 0.0) > 0
+                               or getattr(o, "corrupted", 0) > 0),
             },
             "complexity": {
                 "median": novel[len(novel) // 2] if novel else 0,
