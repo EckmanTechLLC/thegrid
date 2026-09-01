@@ -410,6 +410,8 @@ class Habitat:
                         if world.biome(o.x, o.y) == biome})
             for biome in range(4)
         }
+        lineage_counts = Counter(o.lineage for o in colony.organisms)
+        lineage_top = (max(lineage_counts.values()) / population) if population else 0.0
         self.history.record_ecology(
             self.epoch, world.tick, population=population, diversity=diversity,
             dominance=carriers / population if population else 0.0,
@@ -433,6 +435,7 @@ class Habitat:
             calls=getattr(colony, "calls", 0),
             publish_refused=getattr(colony, "publish_refused", 0),
             salvaged=getattr(colony, "salvaged", 0.0),
+            lineages=len(lineage_counts), lineage_top=lineage_top,
         )
         details = [self._organism_detail(o, tick=world.tick) for o in colony.organisms]
         self.organism_latest = {(self.epoch, item["id"]): item for item in details}
@@ -521,6 +524,11 @@ class Habitat:
                 "victims": sum(1 for o in colony.organisms
                                if getattr(o, "robbed", 0.0) > 0
                                or getattr(o, "corrupted", 0) > 0),
+            },
+            "lineages": {
+                "count": len(lineage_counts),
+                "topShare": round(lineage_top, 3),
+                "sizes": [n for _, n in lineage_counts.most_common(8)],
             },
             "complexity": {
                 "median": novel[len(novel) // 2] if novel else 0,
