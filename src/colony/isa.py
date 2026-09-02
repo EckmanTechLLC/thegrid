@@ -179,6 +179,32 @@ ISA = [
     Instruction("corrupt", 0.90, "write A into an adjacent organism's genome at B"),
 ]
 
+# Which opcodes each feature gates. organism.execute checks the feature before
+# running these, so without it they fall through and execute as a nop. Stated
+# once here so recolonisation can ask what is inert at a destination instead of
+# a second copy of this list drifting out of step with the first.
+FEATURE_OPS = {
+    "burn": (Op.BURN,),
+    "bounty": (Op.OFFER,),
+    "macro": (Op.DEFINE, Op.MACRO0, Op.MACRO1, Op.MACRO2, Op.MACRO3,
+              Op.MACRO4, Op.MACRO5, Op.MACRO6, Op.MACRO7),
+    "predation": (Op.STEAL, Op.CORRUPT),
+}
+
+# Replication a migrant can perform alone. `call` and the macros reach code in
+# the shared commons, which does not travel with it, and a passenger relies on
+# a groupmate, which does not travel either - a migrant arrives ungrouped into
+# an empty commons.
+SELF_SUFFICIENT = (Op.ALLOC, Op.COPY, Op.FORK)
+
+
+def inert_ops(features) -> set[int]:
+    """Opcodes that would execute as nops for a colony with these features."""
+    enabled = set(features or ())
+    return {int(op) for name, ops in FEATURE_OPS.items() if name not in enabled
+            for op in ops}
+
+
 NUM_OPS = len(ISA)
 NAME_TO_OP = {instruction.name: i for i, instruction in enumerate(ISA)}
 
