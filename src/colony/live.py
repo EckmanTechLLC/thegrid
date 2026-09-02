@@ -21,7 +21,8 @@ from aiohttp import web
 
 from .colony import Colony
 from .history import LineageHistory, genome_id
-from .isa import ISA, NAME_TO_OP, Op, build_ancestor, build_founder_palette
+from .isa import (ISA, NAME_TO_OP, Op, SELF_SUFFICIENT, build_ancestor,
+                  build_founder_palette, inert_ops)
 from .odin_operator import OdinMutator
 from .record import ALPHABET, encode_energy, encode_genome, encode_positions
 from .tasks import TemporalTaskEnvironment
@@ -118,24 +119,52 @@ class Habitat:
         survived its discoverer. An extinct island is now recolonised by
         whatever is alive elsewhere.
 
-        The arrival is deliberately hostile. Feature sets differ per colony, so
-        a lineage that leaned on macro opcodes lands where those eight are
-        inert nops, and a bounty economy arrives where offer does nothing. The
-        migrant carries instructions that no longer mean what they meant.
+        The arrival was meant to be hostile: feature sets differ per colony, so
+        a lineage that leaned on macro opcodes lands where those eight are inert
+        nops. That was not a pressure to adapt to, it was sterility. Colony four
+        recorded three consecutive epochs ending at exactly max_age with 0, 4
+        and 0 births after being recolonised from a macro-using peer - a whole
+        population arriving, living out its full lifespan, and never
+        reproducing once. Every organism sampled there carried an instruction
+        that does nothing in that colony.
+
+        A migrant must therefore be able to live at the destination on arrival:
+        no opcode that is inert here, and its own alloc/copy/fork rather than a
+        call into a commons that is empty or a groupmate that did not travel
+        with it. What is rejected is counted in the event so a colony reseeding
+        from ancestors says why.
         """
         candidates = [p for p in self.peers if p != self.last_donor] or list(self.peers)
         self._migration_rng.shuffle(candidates)
         for peer in candidates:
             try:
                 with urllib.request.urlopen(
-                        f"http://{peer}/api/emigrants?n=24", timeout=4) as response:
+                        f"http://{peer}/api/emigrants?n=64", timeout=5) as response:
                     payload = json.load(response)
             except Exception:
                 continue
-            genomes = [[NAME_TO_OP[n] for n in g if n in NAME_TO_OP]
+            offered = [[NAME_TO_OP[n] for n in g if n in NAME_TO_OP]
                        for g in payload.get("genomes", [])]
-            genomes = [g for g in genomes if len(g) >= 2]
+            dead_here = inert_ops(self.features)
+            needed = {int(op) for op in SELF_SUFFICIENT}
+            genomes, rejected = [], {"inert": 0, "dependent": 0, "short": 0}
+            for g in offered:
+                if len(g) < 2:
+                    rejected["short"] += 1
+                elif dead_here.intersection(g):
+                    rejected["inert"] += 1
+                elif not needed.issubset(g):
+                    rejected["dependent"] += 1
+                else:
+                    genomes.append(g)
             if len(genomes) < 4:            # a dying peer is not a founder pool
+                self.events.append({
+                    "tick": 0,
+                    "text": f"{payload.get('colony', peer)} offered "
+                            f"{len(offered)} genomes, {len(genomes)} viable here "
+                            f"({rejected['inert']} inert, "
+                            f"{rejected['dependent']} not self-sufficient)",
+                })
                 continue
             colony = self._new_colony(founder_genomes=genomes)
             if not colony.organisms:
@@ -144,7 +173,8 @@ class Habitat:
             self.events.append({
                 "tick": 0,
                 "text": f"recolonised from {payload.get('colony', peer)} "
-                        f"epoch {payload.get('epoch')} ({len(genomes)} genomes)",
+                        f"epoch {payload.get('epoch')}: {len(genomes)} of "
+                        f"{len(offered)} genomes viable here",
             })
             return colony
         return None
