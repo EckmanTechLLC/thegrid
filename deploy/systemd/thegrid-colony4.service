@@ -1,0 +1,25 @@
+[Unit]
+Description=The Grid Colony Four
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/etl/odin/thegrid-colony4
+ExecStart=/home/etl/odin/thegrid-worktree/.venv/bin/python -m src.colony.live --host 0.0.0.0 --port 8790 --ticks-per-second 10 --mutator random --name "Colony Four" --features "burn,predation" --peers "127.0.0.1:8787,127.0.0.1:8788,127.0.0.1:8789,127.0.0.1:8791,127.0.0.1:8792,127.0.0.1:8793" --state /home/etl/.local/state/thegrid-colony4/colony.pkl
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/etl/odin/thegrid-colony4
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/etl/.local/state/thegrid-colony4
+MemoryMax=1536M
+MemoryHigh=1024M
+MemorySwapMax=0
+CPUQuota=100%
+CPUWeight=100
+
+[Install]
+WantedBy=default.target
