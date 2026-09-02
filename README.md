@@ -8,6 +8,51 @@ it is not placed in every organism's thought loop.
 The repository also retains the original Phase 1 Aria/Flux prototype while the
 colony observation layer is integrated with its useful infrastructure.
 
+This `colony2-experimental` branch runs a separate computational habitat with
+six appended instructions: modular `add`/`sub`, bitwise `xor`, eight bytes of
+private scratch memory accessed through `load`/`store`, and a register-controlled
+relative jump. Existing instruction numbers are unchanged. The experimental
+service uses blind mutation so these capabilities must emerge through the
+substrate rather than authored proposals. Its experimental mutator uses a 1.2%
+copy-error rate, a 6% single-indel rate, and a 2.5% chance per birth of inserting
+a contiguous two-to-four-instruction burst. Colony One retains the conservative
+mutation regime.
+
+Gene-scale variation can also duplicate a two-to-six-instruction segment
+(1.5% per birth), delete a two-to-four-instruction block (1%), or invert a
+two-to-six-instruction block (1%). Genomes are capped at 64 instructions. The
+live state and SQLite fossil record track mutation mechanisms separately and
+report whether their originating genomes later reproduced.
+
+Colony Two also offers a delayed forecast niche. Two `input` values define a
+future modular sum, but `output` pays its 18-energy reward only after 24 ticks
+and only when the answer was stored before the delay and loaded from scratch
+afterward. The 32-tick redemption window permits many loop shapes while making
+arithmetic, memory, and timing potentially adaptive. `/api/state` reports
+cumulative experimental-instruction executions, attempts, solutions, and live
+pending challenges. Colony One does not have this pressure and remains the
+unchanged reference habitat.
+
+Resource weather prevents a settled monoculture from seeing a permanently
+stationary world. Every 1,000 ticks one quadrant retains only 8% of its stored
+energy while the opposite quadrant blooms to at least 75% capacity; structures
+in the drought region are halved. During the final 100 ticks before a storm,
+`input` returns the upcoming drought and bloom quadrant numbers. Storms never
+kill organisms directly, and the observer exposes the countdown and durable
+storm events.
+
+Signals radiate to Manhattan radius three, begin with strength 24, lose five
+strength per tile, and decay once per tick. Stronger broadcasts replace weaker
+ones. Telemetry distinguishes signals heard, movement immediately guided by a
+heard signal, and energy harvested after that movement; the fossil record also
+ranks persistent `signal` and `listen` genomes. No energy reward is attached to
+communication itself.
+
+The installed colony-two observer listens on LAN port 8788. Its state, history,
+and mutation queue live under `~/.local/state/thegrid-colony2`, wholly separate
+from epoch 1207. Both colony services receive the same bounded allocation: 5%
+CPU, 192 MiB RSS, and zero swap.
+
 ## Run the colony
 
 ```bash

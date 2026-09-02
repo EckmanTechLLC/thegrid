@@ -218,7 +218,7 @@ const A = "0123456789abcdefghijklmnopqrstuv";
 const RAMP = ['#171331','#241a4d','#3a1f63','#56206e','#75216f','#94266a','#b4305c','#d24a45','#ea7128','#ffb03a'];
 // One hue per founding lineage. Chosen to stay legible over a field that runs
 // indigo through magenta to amber.
-const STRAIN = ['#7FE9FF','#7CFFC4','#C9A6FF','#FFFFFF','#FF9BD2','#C3FF6B'];
+const STRAIN = ['#7FE9FF','#7CFFC4','#C9A6FF','#FFFFFF','#FF9BD2','#C3FF6B','#FFB03A','#68DFFF','#FF7A68','#A98BFF','#63E6BE','#FFD6A5'];
 const STRAIN_RGB = STRAIN.map(h => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)]);
 const ISA = DATA.isa || [];
 
@@ -251,10 +251,10 @@ function drawField(frame){
   // Organisms are drawn over the field, coloured by which founder they descend
   // from — so a strain sweeping the map is something you can see happen.
   const o = frame.o;
-  for (let i = 0; i + 2 < o.length + 1; i += 3){
-    const idx = A.indexOf(o[i]) * 32 + A.indexOf(o[i+1]);
+  for (let i = 0; i + 3 < o.length + 1; i += 4){
+    const idx = A.indexOf(o[i]) * 1024 + A.indexOf(o[i+1]) * 32 + A.indexOf(o[i+2]);
     if (idx < 0 || idx >= W*H) continue;
-    const [r,g,b] = STRAIN_RGB[A.indexOf(o[i+2]) % STRAIN_RGB.length] || STRAIN_RGB[0];
+    const [r,g,b] = STRAIN_RGB[A.indexOf(o[i+3]) % STRAIN_RGB.length] || STRAIN_RGB[0];
     d[idx*4] = r; d[idx*4+1] = g; d[idx*4+2] = b; d[idx*4+3] = 255;
   }
   btx.putImageData(img, 0, 0);

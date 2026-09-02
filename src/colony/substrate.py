@@ -60,6 +60,79 @@ class SubstrateWorld(World):
     thermal_threshold_c = 72.0
     thermal_penalty = 0.08
 
+    # -- Odin as the climate -----------------------------------------------
+    # The simulated quadrant carousel is gone. Storms now fire on this
+    # machine's real thermal load, and the quadrant they burn is chosen by
+    # the machine's own state, so the colony's weather is whatever Odin is
+    # actually doing. Baseline is a slow EMA rather than a fixed threshold:
+    # idle Tctl already sits above thermal_threshold_c, so only a *rise*
+    # above the recent trailing average counts as an event.
+    # Tctl on this chip swings 62 -> 96C within seconds on boost transients.
+    # Comparing an instantaneous read against a 60-second baseline measured
+    # that noise, not load: storms fired in roughly half of all refractory
+    # windows. Both sides are now smoothed. The fast EMA (~1000 ticks, ~2min)
+    # is the current reading, the slow one (~10000 ticks, ~20min) is what this
+    # box has been doing lately, and weather is the gap between them. A boost
+    # spike moves the fast average a fraction of a degree; a sustained load -
+    # an indexer pass, an inference run - moves it by ten or more.
+    machine_fast_alpha = 0.001     # ~1000 ticks: the smoothed current reading
+    machine_alpha = 0.0001         # ~10000 ticks: what counts as normal here
+    # Measured against scripted transients: a 2s boost to 96C peaks the fast
+    # average at +0.43 and a 5s one at +1.07, while five minutes of indexer at
+    # 78C reaches +12.4. These thresholds sit in that gap, so a spike raises
+    # neither the cue nor a storm and a real workload raises both.
+    machine_warning_delta = 1.00   # degrees over baseline that raise a warning
+    machine_trigger_delta = 1.50   # degrees over baseline that fire a storm
+    machine_memory_band = 0.50     # cgroup pressure that flips the memory bit
+    storm_refractory = 1000        # ticks a storm may not re-fire within
+
+    # -- Odin's spare capacity is the colony's income ----------------------
+    # Tile regeneration is not a pasture. It is whatever scheduler time this
+    # machine is not already spending on something else, so running a model is
+    # a famine and an idle night is a harvest. Measured system-wide from
+    # /proc/stat: a cgroup cannot distinguish "I was not scheduled" from "I did
+    # not ask", but the box's idle fraction is unambiguous.
+    #
+    # Scaled against a slow trailing baseline rather than an absolute, because
+    # 32 cores idle at ~0.99 spare and no fixed threshold would ever fire. What
+    # matters is the DEVIATION: income tracks (spare / usual spare) squared.
+    # There is deliberately no floor. If Odin is busy for long enough the
+    # colony starves, and extinction is a legitimate outcome.
+    cpu_alpha = 0.002              # EMA rate for the spare-capacity baseline
+    cpu_sample_interval = 0.5      # seconds between /proc/stat reads
+    regen_exponent = 2.0           # how sharply income follows spare capacity
+    regen_ceiling = 1.5            # an unusually quiet box pays a bounded bonus
+
+    # -- the grazing subsidy is being withdrawn -----------------------------
+    # Nothing complex ever evolved here because nothing ever required it. A
+    # 12-op grazing loop is a complete answer to this world, so evolution kept
+    # returning one. Tiles were a pasture: free energy, renewed forever, and
+    # computation was optional side income nobody needed.
+    #
+    # Tile yield now decays linearly to zero and does not come back. What is
+    # left afterwards is a machine economy: energy enters only as work the
+    # system sets (tasks), and moves only by being called by another program
+    # (royalties) or by reclaiming what died (salvage). Work, service,
+    # recycling. No field.
+    #
+    # This also wakes something already built and dormant. Task prices float
+    # with crowding, so once grazing stops paying, an organism that can tell
+    # which task is underpriced and switch to it out-earns one that cannot -
+    # which needs internal state and a model of the world.
+    #
+    # Keyed off this world's own tick, so a fresh epoch gets its own grace
+    # period instead of being born into ground that is already dead. There is
+    # no floor: if nothing finds another income, the colony starves.
+    subsidy_ticks = 500_000        # ticks from full pasture to none
+
+    @property
+    def grazing_subsidy(self) -> float:
+        start = getattr(self, "subsidy_start_tick", None)
+        if start is None:
+            start = self.subsidy_start_tick = self.tick
+        elapsed = self.tick - start
+        return max(0.0, 1.0 - elapsed / self.subsidy_ticks)
+
     def __init__(self, config: WorldConfig | None = None):
         super().__init__(config)
         self._pages: list[bytearray] = []
@@ -70,6 +143,8 @@ class SubstrateWorld(World):
     def from_world(cls, old: World) -> "SubstrateWorld":
         new = cls(old.config)
         new.energy = old.energy
+        new.scrap = getattr(old, "scrap", new.scrap)
+        new.bus = getattr(old, "bus", new.bus)
         new.memory_used = old.memory_used
         new.instructions_this_tick = old.instructions_this_tick
         new.tick = old.tick
@@ -127,6 +202,15 @@ class SubstrateWorld(World):
             self._pages.pop()
         self.memory_used = max(0, self.memory_used - words)
 
+    def harvest(self, x: int, y: int) -> float:
+        """Grazing pays the withdrawn rate, not the historical one.
+
+        Without this the ramp would only slow refill, and the population would
+        simply graze the standing stock to zero and die on a cliff instead of a
+        gradient.
+        """
+        return super().harvest(x, y) * self.grazing_subsidy
+
     @property
     def memory_pressure(self) -> float:
         return self.cgroup_memory_current / self.cgroup_memory_max
@@ -145,29 +229,157 @@ class SubstrateWorld(World):
         # Compatibility with World.__init__; thermal state is sensor-owned.
         pass
 
+    @staticmethod
+    def _cpu_totals() -> tuple[int, int]:
+        """(idle+iowait, total) jiffies for the whole machine."""
+        fields = [int(v) for v in
+                  open("/proc/stat").readline().split()[1:]]
+        return fields[3] + fields[4], sum(fields)
+
+    def _sample_cpu(self) -> None:
+        """Refresh the machine's spare-capacity reading, at most every 0.5s."""
+        now = time.monotonic()
+        if now - getattr(self, "_cpu_sampled_at", 0.0) < self.cpu_sample_interval:
+            return
+        try:
+            idle, total = self._cpu_totals()
+        except (OSError, ValueError, IndexError):
+            return
+        previous = getattr(self, "_cpu_prev", None)
+        self._cpu_prev = (idle, total)
+        self._cpu_sampled_at = now
+        if previous is None:
+            return
+        idle_delta, total_delta = idle - previous[0], total - previous[1]
+        if total_delta <= 0:
+            return
+        spare = max(0.0, min(1.0, idle_delta / total_delta))
+        baseline = getattr(self, "machine_spare_baseline", None)
+        if baseline is None:
+            baseline = spare
+        self.machine_spare_baseline = baseline + (spare - baseline) * self.cpu_alpha
+        self.machine_spare = spare
+
+    @property
+    def regen_multiplier(self) -> float:
+        """Income as a share of what this machine usually has going spare."""
+        baseline = getattr(self, "machine_spare_baseline", 0.0)
+        if baseline <= 0.0:
+            return 1.0
+        ratio = getattr(self, "machine_spare", baseline) / baseline
+        return min(self.regen_ceiling, max(0.0, ratio) ** self.regen_exponent)
+
+    def _sample_machine(self) -> None:
+        """Take one reading of Odin per tick; everything else reuses it."""
+        if getattr(self, "_machine_tick", None) == self.tick:
+            return
+        self._machine_tick = self.tick
+        self._sample_cpu()
+        heat = self.heat
+        fast = getattr(self, "machine_heat_fast", None)
+        if fast is None:
+            fast = heat
+        fast += (heat - fast) * self.machine_fast_alpha
+        self.machine_heat_fast = fast
+        baseline = getattr(self, "machine_baseline", None)
+        if baseline is None:
+            baseline = fast
+        self.machine_baseline = baseline + (fast - baseline) * self.machine_alpha
+        self.machine_excess = fast - self.machine_baseline
+        try:
+            self.machine_memory = self.memory_pressure
+        except (OSError, RuntimeError, ZeroDivisionError):
+            self.machine_memory = 0.0
+
+    @property
+    def machine_band(self) -> int:
+        """Odin's live state, quantised onto the four quadrants."""
+        self._sample_machine()
+        hot = getattr(self, "machine_excess", 0.0) >= self.machine_warning_delta
+        tight = getattr(self, "machine_memory", 0.0) >= self.machine_memory_band
+        return int(hot) + 2 * int(tight)
+
+    def storm_regions(self, tick: int | None = None) -> tuple[int, int]:
+        """Which quadrant burns is Odin's state, not a clock cycle."""
+        drought = self.machine_band
+        return drought, (drought + 2) % 4
+
+    def apply_resource_storm(self) -> bool:
+        """Fire when the machine actually heats up, not on a fixed interval."""
+        self._sample_machine()
+        last = getattr(self, "last_storm_tick", -1)
+        if self.tick - last < self.storm_refractory:
+            return False
+        if getattr(self, "machine_excess", 0.0) < self.machine_trigger_delta:
+            return False
+        drought, bloom = self.storm_regions()
+        return self._apply_storm(drought, bloom)
+
+    @property
+    def next_storm_tick(self) -> int:
+        """Earliest tick a storm could fire; the machine decides whether it does."""
+        return max(self.tick,
+                   getattr(self, "last_storm_tick", -1) + self.storm_refractory)
+
+    def weather_cue(self, x: int, y: int) -> int | None:
+        """The information biome feels Odin warming; nowhere else can.
+
+        A thermal rise precedes the storm it will trigger, so an organism in
+        the SE information niche can read which quadrant is about to burn
+        before it burns. The reading is worthless where it is taken -- the
+        sensor sits in biome 3, the drought lands in whichever quadrant the
+        band names -- so profiting from it means moving, or telling someone.
+        This is the first thing in the world that `scan` cannot derive locally.
+        """
+        self._sample_machine()
+        # No upper bound: a sharp thermal ramp crosses the trigger between two
+        # samples, so a narrow warning band is unobservable in practice. The
+        # cue is live for as long as the machine is running hot, and the band
+        # it names is the quadrant the next storm will burn.
+        if getattr(self, "machine_excess", 0.0) < self.machine_warning_delta:
+            return None
+        if self.biome(x, y) != 3:
+            return None
+        return self.machine_band
+
     @property
     def cost_multiplier(self) -> float:
-        over = self.heat - self.thermal_threshold_c
+        # Priced off the smoothed reading, not the instantaneous one. On raw
+        # Tctl a two-second boost spike tripled the cost of every instruction
+        # in the colony; sustained heat still does, which is the intent.
+        heat = getattr(self, "machine_heat_fast", None)
+        if heat is None:
+            heat = self.heat
+        over = heat - self.thermal_threshold_c
         return 1.0 + self.thermal_penalty * over if over > 0 else 1.0
 
     def step(self) -> None:
         # Tile chemistry remains part of the habitat, but memory, scheduler
         # time, and thermal pressure are taken directly from Linux/hardware.
         c = self.config
-        phase = (self.tick // 2000) % 4
+        self.apply_resource_storm()
+        # The favoured biome tracks the machine, not a 2000-tick carousel.
+        phase = self.machine_band
+        # Income is Odin's spare capacity. No floor: a busy enough box is a
+        # famine, and a long enough famine is an extinction.
+        regen = self.regen_multiplier * self.grazing_subsidy
         for y, row in enumerate(self.energy):
             for x in range(c.width):
                 if row[x] < c.tile_capacity:
-                    quadrant = (x >= c.width // 2) + 2 * (y >= c.height // 2)
-                    climate = 1.8 if quadrant == phase else 0.55
-                    construction = self.structures[y][x] * 0.003
-                    row[x] = min(c.tile_capacity, row[x] + c.tile_regen * climate + construction)
+                    biome = self.biome(x, y)
+                    climate = 1.8 if biome == phase else 0.55
+                    base = (1.25, 0.65, 0.40, 0.75)[biome]
+                    construction = self.structures[y][x] * 0.003 * (4.0 if biome == 2 else 0.6)
+                    row[x] = min(c.tile_capacity,
+                                 row[x] + c.tile_regen * climate * base * regen
+                                 + construction)
                 if self.signal_strength[y][x] > 0:
                     self.signal_strength[y][x] -= 1
                     if self.signal_strength[y][x] == 0:
                         self.signals[y][x] = 0
                 if self.tick and self.tick % 500 == 0 and self.structures[y][x] > 0:
                     self.structures[y][x] -= 1
+        self.decay_commons()
         self.instructions_this_tick = 0
         self.tick += 1
 
@@ -176,6 +388,9 @@ class SubstrateWorld(World):
         state.pop("_pages", None)
         state.pop("_cgroup", None)
         state.pop("_temp_cache", None)
+        state.pop("_machine_tick", None)
+        state.pop("_cpu_prev", None)
+        state.pop("_cpu_sampled_at", None)
         return state
 
     def __setstate__(self, state):

@@ -1,0 +1,22 @@
+[Unit]
+Description=The Grid mutation operator (local model authors variants)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/etl/odin/thegrid-operator
+ExecStart=/usr/bin/python3 /home/etl/odin/thegrid-operator/grid_operator.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+Environment=GRID_QUEUES=/home/etl/.local/state/thegrid/operator:/home/etl/.local/state/thegrid-colony7/operator
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/etl/.local/state/thegrid /home/etl/.local/state/thegrid-colony7
+MemoryMax=512M
+CPUQuota=50%
+
+[Install]
+WantedBy=default.target

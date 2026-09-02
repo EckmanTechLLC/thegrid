@@ -1,13 +1,16 @@
 from src.colony.colony import Colony
-from src.colony.isa import Op, build_ancestor
-from src.colony.mutation import RandomMutator, parse_genome
+from src.colony.isa import ISA, Op, build_ancestor, build_founder_palette
+from src.colony.record import encode_positions
+from src.colony.mutation import ExperimentalMutator, RandomMutator, parse_genome
 from src.colony.world import World, WorldConfig
 from src.colony.live import Habitat
 from src.colony.odin_operator import OdinMutator
 from src.colony.organism import Organism
 from src.colony.history import LineageHistory
+from src.colony.tasks import TemporalTaskEnvironment
 import json
 import random
+from collections import Counter
 from types import SimpleNamespace
 
 
@@ -39,6 +42,48 @@ def test_ancestor_is_valid():
     assert all(isinstance(word, int) for word in build_ancestor())
 
 
+def test_diverse_founders_are_unique_viable_and_fit_large_map_encoding():
+    palette = build_founder_palette()
+    assert len(palette) == len({tuple(genome) for genome in palette}) == 13
+    for lineage, genome in enumerate(palette):
+        world = World(WorldConfig(width=48, height=48, tile_regen=0.5,
+                                  memory_cap=500, seed=100 + lineage))
+        colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
+                        seed=100 + lineage, founders=1,
+                        founder_genomes=[genome])
+        for _ in range(300):
+            colony.step()
+        assert colony.births > 0, f"founder {lineage} did not reproduce"
+    colony = Colony(World(WorldConfig(width=48, height=48, seed=5)),
+                    founders=len(palette), founder_genomes=palette)
+    colony.organisms[0].x, colony.organisms[0].y = 47, 47
+    encoded = encode_positions(colony, 48)
+    assert len(encoded) == 4 * len(colony.organisms)
+    assert encoded[:3] == "27v"  # base-32 encoding of tile 2303
+
+
+def test_diverse_epoch_seeds_every_lineage_on_a_rich_distinct_patch():
+    world = World(WorldConfig(width=48, height=48, seed=42))
+    colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
+                    seed=42, founders=13,
+                    founder_genomes=build_founder_palette())
+    positions = {(o.x, o.y) for o in colony.organisms}
+    assert len(positions) == 13
+    assert all(world.tile_energy(o.x, o.y) == world.config.tile_capacity
+               for o in colony.organisms)
+    assert all(o.energy == 48.0 for o in colony.organisms)
+
+
+def test_epoch_can_inoculate_four_organisms_per_lineage():
+    colony = Colony(World(WorldConfig(width=48, height=48, seed=42)),
+                    seed=42, founders=13,
+                    founder_genomes=build_founder_palette(), founder_copies=4)
+    counts = Counter(o.lineage for o in colony.organisms)
+    assert len(colony.organisms) == 52
+    assert counts == Counter({lineage: 4 for lineage in range(13)})
+    assert len({(o.x, o.y) for o in colony.organisms}) == 52
+
+
 def test_live_habitat_restores_checkpoint(tmp_path):
     state = tmp_path / "colony.pkl"
     habitat = Habitat(state, seed=9, founders=2, physical=False)
@@ -51,8 +96,10 @@ def test_live_habitat_restores_checkpoint(tmp_path):
     restored = Habitat(state, physical=False)
     assert restored.colony.world.tick == 25
     assert restored.snapshot()["population"] == len(restored.colony.organisms)
-    assert len(restored.snapshot()["signalField"]) == 32 * 32
-    assert len(restored.snapshot()["structureField"]) == 32 * 32
+    assert len(restored.snapshot()["signalField"]) == 48 * 48
+    assert len(restored.snapshot()["structureField"]) == 48 * 48
+    assert len(restored.snapshot()["biomeField"]) == 48 * 48
+    assert len(restored.snapshot()["biomePopulations"]) == 4
 
 
 def test_extinction_releases_old_colony_and_seeds_one_new_epoch(tmp_path):
@@ -110,6 +157,30 @@ def test_ecology_instructions_enable_communication_construction_and_parasitism()
     sender.execute(colony)
     assert sender.child == [Op.NAND]
     assert colony.foreign_copies == 1
+
+
+def test_signals_radiate_and_can_guide_harvest_movement():
+    world = World(WorldConfig(width=8, height=8, memory_cap=500, seed=23))
+    colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
+                    seed=23, founders=2)
+    sender, receiver = colony.organisms
+    sender.x, sender.y = 1, 1
+    receiver.x, receiver.y = 4, 1
+    sender.a, sender.genome = 73, [Op.SIGNAL]
+    sender.execute(colony)
+    assert world.signal_strength[1][1] == 24
+    assert world.signal_strength[1][4] == 9
+
+    receiver.genome = [Op.LISTEN]
+    receiver.execute(colony)
+    assert receiver.a == 73
+    assert receiver.signals_heard == 1
+    receiver.genome = [Op.MOVE]
+    receiver.execute(colony)
+    receiver.genome = [Op.HARVEST]
+    receiver.execute(colony)
+    assert receiver.signal_guided_moves == 1
+    assert receiver.post_signal_harvested > 0
 
 
 def test_task_reward_requires_two_fresh_inputs_and_is_single_use():
@@ -220,7 +291,7 @@ def test_live_inspector_tracks_current_organism_and_recent_death(tmp_path):
     detail = habitat.organism_latest[(habitat.epoch, organism.id)]
     assert detail["status"] == "alive"
     assert detail["currentInstruction"] == "harvest"
-    assert detail["genome"][0:2] == ["harvest", "harvest"]
+    assert detail["scratch"] == [0] * 8
     assert len(detail["genomeId"]) == 16
     assert detail["genomeGlyph"] == detail["genomeId"][0]
     assert len(habitat.latest["genomeGlyphs"]) == habitat.latest["population"]
@@ -231,3 +302,291 @@ def test_live_inspector_tracks_current_organism_and_recent_death(tmp_path):
     assert dead["status"] == "dead"
     assert dead["cause"] == "starvation"
     habitat.history.close()
+
+
+def test_experimental_arithmetic_and_scratch_memory():
+    colony = Colony(World(WorldConfig(width=4, height=4, memory_cap=100, seed=12)),
+                    RandomMutator(point_rate=0, indel_rate=0), seed=12, founders=1)
+    organism = colony.organisms[0]
+    organism.a, organism.b = 250, 10
+    organism.genome = [Op.ADD]
+    organism.execute(colony)
+    assert organism.a == 4
+    organism.genome = [Op.SUB]
+    organism.execute(colony)
+    assert organism.a == 250
+    organism.genome = [Op.XOR]
+    organism.execute(colony)
+    assert organism.a == (250 ^ 10)
+
+    organism.a, organism.b = 73, 3
+    organism.genome = [Op.STORE]
+    organism.execute(colony)
+    organism.a = 0
+    organism.genome = [Op.LOAD]
+    organism.execute(colony)
+    assert organism.a == 73
+
+
+def test_experimental_relative_jump_uses_register_c():
+    colony = Colony(World(WorldConfig(width=4, height=4, memory_cap=100, seed=13)),
+                    RandomMutator(point_rate=0, indel_rate=0), seed=13, founders=1)
+    organism = colony.organisms[0]
+    organism.genome = [Op.JMPR, Op.NOP, Op.NOP, Op.NOP]
+    organism.ip, organism.c = 0, 9
+    organism.execute(colony)
+    assert organism.ip == 2
+
+
+def test_temporal_forecast_requires_delayed_scratch_recall():
+    world = World(WorldConfig(width=4, height=4, memory_cap=100, seed=15))
+    tasks = TemporalTaskEnvironment(forecast_delay=8, forecast_window=8,
+                                    forecast_reward=18.0)
+    colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
+                    tasks=tasks, seed=15, founders=1)
+    organism = colony.organisms[0]
+
+    organism.genome = [Op.INPUT]
+    organism.execute(colony)
+    organism.genome = [Op.SWAP]
+    organism.execute(colony)
+    organism.genome = [Op.INPUT]
+    organism.execute(colony)
+    organism.genome = [Op.ADD]
+    organism.execute(colony)
+    target = organism.a
+    organism.genome = [Op.STORE]
+    organism.execute(colony)
+
+    # A correct answer is deliberately worthless before the environmental delay.
+    organism.genome = [Op.OUTPUT]
+    before = organism.energy
+    organism.execute(colony)
+    assert organism.forecasts_solved == 0
+    assert organism.energy < before
+
+    world.tick = organism.forecast_due_tick
+    organism.genome = [Op.LOAD]
+    organism.execute(colony)
+    assert organism.a == target
+    organism.genome = [Op.OUTPUT]
+    before = organism.energy
+    organism.execute(colony)
+    assert organism.energy > before
+    assert organism.forecasts_solved == 1
+    assert colony.forecasts_solved == 1
+    assert organism.tasks_solved["forecast"] == 1
+    assert colony.experimental_ops["add"] == 1
+    assert colony.experimental_ops["store"] == 1
+    assert colony.experimental_ops["load"] == 1
+
+
+def test_temporal_forecast_is_reachable_by_a_looping_replicator():
+    world = World(WorldConfig(width=8, height=8, tile_regen=0.5,
+                              memory_cap=500, seed=16))
+    colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
+                    tasks=TemporalTaskEnvironment(), seed=16, founders=1)
+    organism = colony.organisms[0]
+    organism.energy = 200
+    organism.genome = [
+        Op.HARVEST, Op.INPUT, Op.SWAP, Op.INPUT, Op.ADD, Op.STORE,
+        Op.LOAD, Op.OUTPUT, Op.ALLOC, Op.COPY, Op.IFNOTDONE, Op.JMPB, Op.FORK,
+    ]
+    world.memory_used = len(organism.genome)
+    for _ in range(100):
+        colony.step()
+    assert colony.forecasts_solved > 0
+    assert colony.births > 0
+
+
+def test_experimental_mutator_can_insert_short_instruction_bursts():
+    class AlwaysBurst(random.Random):
+        def random(self):
+            return 0.0
+
+    genome = [Op.HARVEST, Op.ALLOC, Op.COPY, Op.FORK]
+    mutator = ExperimentalMutator(point_rate=0, indel_rate=0,
+                                  burst_rate=1, burst_min=3, burst_max=3,
+                                  duplication_rate=0, block_deletion_rate=0,
+                                  inversion_rate=0)
+    result = mutator.mutate_at_birth(list(genome), AlwaysBurst(17))
+    assert len(result) == len(genome) + 3
+    assert all(0 <= word < len(ISA) for word in result)
+
+
+def test_gene_scale_mutations_are_bounded_and_labeled():
+    genome = [Op.HARVEST, Op.ALLOC, Op.COPY, Op.IFNOTDONE, Op.JMPB, Op.FORK]
+    duplicator = ExperimentalMutator(
+        point_rate=0, indel_rate=0, burst_rate=0, duplication_rate=1,
+        block_deletion_rate=0, inversion_rate=0, max_genome=12)
+    duplicated = duplicator.mutate_at_birth(list(genome), random.Random(31))
+    assert len(genome) + 2 <= len(duplicated) <= 12
+    assert duplicator.last_events == ["segment_duplication"]
+
+    deleter = ExperimentalMutator(
+        point_rate=0, indel_rate=0, burst_rate=0, duplication_rate=0,
+        block_deletion_rate=1, inversion_rate=0)
+    deleted = deleter.mutate_at_birth(list(genome), random.Random(32))
+    assert 4 <= len(deleted) <= len(genome) - 2
+    assert deleter.last_events == ["block_deletion"]
+
+    inverter = ExperimentalMutator(
+        point_rate=0, indel_rate=0, burst_rate=0, duplication_rate=0,
+        block_deletion_rate=0, inversion_rate=1)
+    inverted = inverter.mutate_at_birth(list(genome), random.Random(33))
+    assert len(inverted) == len(genome)
+    assert sorted(inverted) == sorted(genome)
+    assert inverter.last_events == ["segment_inversion"]
+
+
+def test_history_links_mutation_mechanisms_to_later_reproduction(tmp_path):
+    history = LineageHistory(tmp_path / "mechanisms.sqlite3")
+    history.start_epoch(1, 1, 100.0)
+    parent = SimpleNamespace(genome=[Op.HARVEST], generation=0)
+    mutant = SimpleNamespace(genome=[Op.HARVEST, Op.HARVEST], generation=1)
+    history.record(1, [{"kind": "birth", "tick": 10, "organism": mutant,
+                        "parent": parent,
+                        "mutations": ["segment_duplication"]}])
+    child = SimpleNamespace(genome=list(mutant.genome), generation=2)
+    history.record(1, [{"kind": "birth", "tick": 20, "organism": child,
+                        "parent": mutant, "mutations": []}])
+    mechanism = history.summary(1)["mutationMechanisms"][0]
+    assert mechanism["mutation_type"] == "segment_duplication"
+    assert mechanism["origin_births"] == 1
+    assert mechanism["later_reproductions"] == 1
+    assert mechanism["max_generation_span"] == 1
+    history.close()
+
+
+def test_operator_can_retire_living_epoch_without_calling_it_extinct(tmp_path):
+    habitat = Habitat(tmp_path / "retire.pkl", seed=21, founders=2, physical=False)
+    old_tick = habitat.colony.world.tick
+    habitat.retire_current_epoch("playground reset")
+    assert habitat.epoch == 2
+    assert habitat.seed == 22
+    assert habitat.colony.world.tick == 0
+    assert len(habitat.colony.organisms) == 2
+    epochs = habitat.history.summary(2)["epochs"]
+    retired = next(row for row in epochs if row["epoch"] == 1)
+    assert retired["ended_tick"] == old_tick
+    assert retired["extinct"] == 0
+    assert retired["end_reason"] == "playground reset"
+    assert habitat.events[-1]["text"] == "epoch intentionally retired; epoch 2 seeded"
+    habitat.history.close()
+
+
+def test_resource_storm_drains_one_quadrant_and_blooms_the_opposite():
+    config = WorldConfig(width=4, height=4, tile_capacity=100,
+                         storm_interval=10, drought_fraction=0.1,
+                         bloom_fraction=0.8, seed=22)
+    world = World(config)
+    world.energy = [[50.0] * 4 for _ in range(4)]
+    world.structures = [[4] * 4 for _ in range(4)]
+    world.tick = 10
+    assert world.apply_resource_storm()
+    assert world.storm_count == 1
+    assert world.last_drought_quadrant == 1
+    assert world.last_bloom_quadrant == 3
+    assert world.energy[0][2] == 5.0
+    assert world.structures[0][2] == 2
+    assert world.energy[2][2] == 80.0
+    assert world.energy[0][0] == 50.0
+
+
+def test_storm_warning_is_local_and_directional():
+    tasks = TemporalTaskEnvironment(storm_interval=1000, storm_warning=100)
+    world = World(WorldConfig(width=48, height=48, storm_interval=1000,
+                              storm_warning=100, storm_scout_depth=4))
+    world.tick = 899
+    assert world.weather_cue(24, 24) is None
+    world.tick = 900  # next bloom is SE; only its inward boundary can sense it
+    assert world.weather_cue(24, 24) in (1, 2)
+    assert world.weather_cue(40, 40) is None
+    assert world.weather_cue(23, 24) is None
+    cue = world.weather_cue(24, 24)
+    assert tasks.inputs(900, 7, weather_cue=cue) == (cue, cue)
+    assert tasks.inputs(900, 7) != (cue, cue)
+    world.tick = 1000
+    assert world.weather_cue(24, 24) is None
+
+
+def test_local_weather_cue_can_flow_through_signal_listen_move():
+    world = World(WorldConfig(width=48, height=48, storm_interval=1000,
+                              storm_warning=100, storm_scout_depth=4))
+    tasks = TemporalTaskEnvironment(storm_interval=1000, storm_warning=100)
+    colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
+                    tasks=tasks, seed=41, founders=2)
+    scout, listener = colony.organisms
+    world.tick = 900
+    scout.x, scout.y = 24, 24
+    listener.x, listener.y = 27, 24
+    scout.genome = [Op.INPUT, Op.SIGNAL]
+    listener.genome = [Op.LISTEN, Op.MOVE, Op.HARVEST]
+
+    scout.execute(colony)
+    cue = scout.a
+    before_signal = scout.energy
+    scout.execute(colony)
+    assert scout.weather_cues_seen == 1
+    assert scout.weather_cue_signals == 1
+    assert scout.energy < before_signal  # signaling itself has no reward
+
+    listener.execute(colony)
+    assert listener.a == cue
+    listener.execute(colony)
+    assert listener.signal_guided_moves == 1
+    listener.execute(colony)
+    assert listener.post_signal_harvested > 0
+
+
+def test_biomes_create_real_instruction_and_resource_tradeoffs():
+    world = World(WorldConfig(width=8, height=8, seed=30))
+    # NW forage, NE nomad, SW engineer, SE information.
+    assert world.instruction_cost_multiplier(Op.HARVEST, 1, 1) < 1
+    assert world.instruction_cost_multiplier(Op.BUILD, 1, 1) > 1
+    assert world.instruction_cost_multiplier(Op.MOVE, 6, 1) < 1
+    assert world.build_cost(1, 6) < world.build_cost(1, 1)
+    assert world.instruction_cost_multiplier(Op.SIGNAL, 6, 6) < 1
+    assert world.task_reward_multiplier(6, 6) > 1
+    world.energy[1][1] = world.energy[1][6] = 90
+    assert world.harvest(1, 1) > world.harvest(6, 1)
+
+
+def test_biome_boundaries_have_narrow_migration_corridors():
+    world = World(WorldConfig(width=8, height=8, seed=31))
+    assert world.move(3, 0, 1, 0) == (3, 0)  # blocked boundary
+    assert world.move(3, 2, 1, 0) == (4, 2)  # quarter-map gate
+    assert world.move(1, 1, 1, 0) == (2, 1)  # free within a biome
+
+
+def test_death_leaves_decaying_scrap_that_salvage_reclaims():
+    world = World(WorldConfig(width=8, height=8, memory_cap=100, seed=32))
+    colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
+                    seed=32, founders=1)
+    organism = colony.organisms[0]
+    x, y = organism.x, organism.y
+    organism.genome = [Op.NOP] * 20
+    organism.energy = 0.01
+    colony.step()
+    deposited = world.scrap[y][x]
+    assert deposited > 0
+    assert colony.scrap_deposited > 0
+    gained = world.salvage(x, y)
+    assert gained > 0
+    assert world.scrap[y][x] < deposited
+    remaining = world.scrap[y][x]
+    world.step()
+    assert world.scrap[y][x] < remaining
+
+
+def test_salvage_instruction_is_a_costly_contextual_advantage():
+    world = World(WorldConfig(width=8, height=8, memory_cap=100, seed=33))
+    colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
+                    seed=33, founders=1, founder_genomes=[[Op.SALVAGE]])
+    organism = colony.organisms[0]
+    world.scrap[organism.y][organism.x] = 5
+    before = organism.energy
+    colony.step()
+    assert organism.salvaged > 0
+    assert colony.salvaged == organism.salvaged
+    assert organism.energy > before
