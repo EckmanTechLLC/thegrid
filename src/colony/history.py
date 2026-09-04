@@ -247,7 +247,8 @@ class LineageHistory:
                         parent_genome: list[int] | None, generation: int) -> str:
         identity = genome_id(genome)
         parent_id = genome_id(parent_genome) if parent_genome is not None else None
-        source = " · ".join(ISA[word].name if 0 <= word < len(ISA) else f"?{word}"
+        source = " · ".join(ISA[word & 0x3F].name if (word & 0x3F) < len(ISA)
+                            else f"?{word}"
                             for word in genome)
         self._db.execute("""
             INSERT OR IGNORE INTO genomes(genome_id,encoded,source,first_epoch,first_tick,

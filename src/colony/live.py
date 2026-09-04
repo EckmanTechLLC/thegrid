@@ -22,7 +22,7 @@ from aiohttp import web
 from .colony import Colony
 from .history import LineageHistory, genome_id
 from .isa import (ISA, NAME_TO_OP, Op, SELF_SUFFICIENT, build_ancestor,
-                  build_founder_palette, inert_ops)
+                  build_founder_palette, inert_ops, pack, unpack)
 from .odin_operator import OdinMutator
 from .record import ALPHABET, encode_energy, encode_genome, encode_positions
 from .tasks import TemporalTaskEnvironment
@@ -143,7 +143,7 @@ class Habitat:
                     payload = json.load(response)
             except Exception:
                 continue
-            offered = [[NAME_TO_OP[n] for n in g if n in NAME_TO_OP]
+            offered = [[int(w) for w in g if isinstance(w, int)]
                        for g in payload.get("genomes", [])]
             dead_here = inert_ops(self.features)
             needed = {int(op) for op in SELF_SUFFICIENT}
@@ -151,9 +151,9 @@ class Habitat:
             for g in offered:
                 if len(g) < 2:
                     rejected["short"] += 1
-                elif dead_here.intersection(g):
+                elif dead_here.intersection(unpack(w)[0] for w in g):
                     rejected["inert"] += 1
-                elif not needed.issubset(g):
+                elif not needed.issubset(unpack(w)[0] for w in g):
                     rejected["dependent"] += 1
                 else:
                     genomes.append(g)
@@ -636,6 +636,14 @@ class Habitat:
             "events": list(self.events),
         }
 
+    @staticmethod
+    def _render(word: int) -> str:
+        op, src, dst = unpack(word)
+        if op >= len(ISA):
+            return f"?{word}"
+        name = ISA[op].name
+        return name if (src == 0 and dst == 0) else f"{name} r{src}>r{dst}"
+
     def _organism_detail(self, organism, status: str = "alive", cause=None,
                          tick: int | None = None) -> dict:
         genome = list(organism.genome)
@@ -649,8 +657,12 @@ class Habitat:
             "generation": organism.generation, "age": organism.age,
             "energy": round(organism.energy, 2), "births": organism.births,
             "ip": organism.ip, "currentInstruction": (
-                ISA[current].name if current is not None and 0 <= current < len(ISA) else None),
-            "genome": [ISA[word].name if 0 <= word < len(ISA) else f"?{word}"
+                ISA[unpack(current)[0]].name
+                if current is not None and unpack(current)[0] < len(ISA) else None),
+            # A word packs (op, src, dst); show it as the instruction plus its
+            # wiring, or the inspector reads as ?71, ?514, ?67 - which is
+            # jmpb+1, scan r0->r1, move r1->r0 rendered as raw integers.
+            "genome": [self._render(word)
                        for word in genome],
             "registers": {"a": organism.a, "b": organism.b, "c": organism.c},
             "childProgress": (None if organism.child is None else {
@@ -832,7 +844,9 @@ async def create_app(habitat: Habitat, ticks_per_second: int) -> web.Application
         return web.json_response({
             "colony": habitat.name, "epoch": habitat.epoch,
             "tick": colony.world.tick, "population": len(colony.organisms),
-            "genomes": [[ISA[w].name for w in o.genome if 0 <= w < len(ISA)]
+            # Words, not names: a name cannot carry the wiring, and a migrant
+            # whose operands were dropped is a different program.
+            "genomes": [[int(w) for w in o.genome]
                         for o in living],
         })
 

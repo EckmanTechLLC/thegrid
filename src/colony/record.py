@@ -15,6 +15,7 @@ from collections import Counter
 from pathlib import Path
 
 from .colony import Colony
+from .isa import unpack as _unpack_isa  # noqa: F401
 from .isa import ISA, build_ancestor
 from .mutation import (
     LLMMutator,
@@ -145,7 +146,8 @@ def record(ticks: int, every: int, seed: int, width: int, height: int,
         "events": events,
         "dominant": {
             "carriers": carriers,
-            "source": [ISA[op].name for op in genome if 0 <= op < len(ISA)],
+            "source": [ISA[unpack(w)[0]].name for w in genome
+                       if unpack(w)[0] < len(ISA)],
         },
         "summary": {
             "births": colony.births,
