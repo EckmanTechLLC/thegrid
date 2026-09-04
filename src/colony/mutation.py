@@ -32,7 +32,7 @@ import random
 from collections import Counter
 from typing import Protocol
 
-from .isa import ISA, NUM_OPS, NAME_TO_OP, disassemble
+from .isa import ISA, NUM_OPS, NAME_TO_OP, WORD_MAX, disassemble, pack, unpack
 
 LLM_CALL_ENERGY_COST = 40.0     # what it costs an organism to think
 
@@ -51,13 +51,25 @@ class RandomMutator:
 
     def copy_error(self, word: int, rng: random.Random) -> int:
         if rng.random() < self.point_rate:
-            return rng.randrange(NUM_OPS)
+            # Three kinds of point mutation now, not one. Rewiring an operand
+            # is a small change - the same computation reading from or writing
+            # to somewhere else - while changing the opcode is a large one.
+            # A tape only ever offered the large one.
+            op, src, dst = unpack(word)
+            roll = rng.random()
+            if roll < 0.34:
+                op = rng.randrange(NUM_OPS)
+            elif roll < 0.67:
+                src = rng.randrange(8)
+            else:
+                dst = rng.randrange(8)
+            return pack(op, src, dst)
         return word
 
     def mutate_at_birth(self, genome: list[int], rng: random.Random) -> list[int]:
         if rng.random() < self.indel_rate and genome:
             if rng.random() < 0.5:
-                genome.insert(rng.randrange(len(genome) + 1), rng.randrange(NUM_OPS))
+                genome.insert(rng.randrange(len(genome) + 1), pack(rng.randrange(NUM_OPS), rng.randrange(8), rng.randrange(8)))
             else:
                 del genome[rng.randrange(len(genome))]
         return genome
@@ -107,7 +119,7 @@ class ExperimentalMutator(RandomMutator):
         events: list[str] = []
         if genome and rng.random() < self.indel_rate:
             if rng.random() < 0.5 and len(genome) < self.max_genome:
-                genome.insert(rng.randrange(len(genome) + 1), rng.randrange(NUM_OPS))
+                genome.insert(rng.randrange(len(genome) + 1), pack(rng.randrange(NUM_OPS), rng.randrange(8), rng.randrange(8)))
                 events.append("single_insertion")
             elif len(genome) > 4:
                 del genome[rng.randrange(len(genome))]
@@ -116,7 +128,11 @@ class ExperimentalMutator(RandomMutator):
             length = rng.randint(self.burst_min, self.burst_max)
             length = min(length, self.max_genome - len(genome))
             position = rng.randrange(len(genome) + 1)
-            genome[position:position] = [rng.randrange(NUM_OPS) for _ in range(length)]
+            genome[position:position] = [
+                # A new word arrives already wired somewhere, rather than every
+                # insertion defaulting to r0 and crowding one register.
+                pack(rng.randrange(NUM_OPS), rng.randrange(8), rng.randrange(8))
+                for _ in range(length)]
             events.append("random_burst")
         if len(genome) >= 2 and rng.random() < self.duplication_rate and len(genome) < self.max_genome:
             length = min(rng.randint(2, 6), len(genome), self.max_genome - len(genome))

@@ -206,15 +206,68 @@ def inert_ops(features) -> set[int]:
 
 
 NUM_OPS = len(ISA)
+
+# ── explicit wiring ───────────────────────────────────────────────────────
+# A genome word is no longer a bare opcode. It packs (op, src, dst):
+#
+#     bits 0-5   opcode          0..63
+#     bits 6-8   source register  r0..r7
+#     bits 9-11  destination reg  r0..r7
+#
+# In the tape encoding every instruction read and wrote the same implicit
+# register A - 25 of the 50 opcodes touch it, 13 of them write it - so any two
+# capabilities that both used A had to be ordered so neither clobbered the
+# other before it was consumed, and inserting a word between them broke both.
+# Composition was expensive to reach by mutation for reasons that had nothing
+# to do with whether it was useful. Here each instruction names where its input
+# comes from and where its output goes, so adding one disturbs nothing already
+# wired. This is what a netlist is: a list of nodes carrying their own edges.
+#
+# Two-operand form throughout: dst is read as the second input and written as
+# the result, src is the other input. nand r3 -> r5 computes r5 = NAND(r3, r5).
+REG_COUNT = 8
+OP_BITS, REG_BITS = 6, 3
+WORD_MAX = 1 << (OP_BITS + 2 * REG_BITS)
+
+
+def pack(op: int, src: int = 0, dst: int = 0) -> int:
+    return (int(op) & 0x3F) | ((src & 0x7) << OP_BITS) | ((dst & 0x7) << (OP_BITS + REG_BITS))
+
+
+def unpack(word: int) -> tuple[int, int, int]:
+    return word & 0x3F, (word >> OP_BITS) & 0x7, (word >> (OP_BITS + REG_BITS)) & 0x7
+
+
+# Opcodes whose result lands in dst. Everything else leaves the registers alone,
+# so an instruction that acts on the world does not also perturb the wiring.
+WRITES_DST = frozenset({
+    Op.SCAN, Op.INPUT, Op.NAND, Op.INC, Op.DEC, Op.ADD, Op.SUB, Op.XOR,
+    Op.LOAD, Op.LISTEN, Op.PEEK, Op.LOCATE, Op.FETCH,
+})
+
+# Control flow takes its distance from the operand FIELD, not from a register:
+# an immediate, the way a real instruction set encodes a branch offset. A jump
+# that depended on a register value could be retargeted by any unrelated
+# instruction that happened to write it.
+IMMEDIATE_JUMPS = frozenset({Op.JMPB, Op.JMPR})
 NAME_TO_OP = {instruction.name: i for i, instruction in enumerate(ISA)}
 
 
 def build_ancestor() -> list[int]:
-    """A small viable replicator; all later organisms descend from this."""
+    """A small viable replicator; all later organisms descend from this.
+
+    Same nine instructions as the tape ancestor, now wired: scan deposits a
+    direction in r1 and move consumes it, and jmpb carries its own distance.
+    """
     return [
-        Op.HARVEST, Op.HARVEST, Op.ALLOC, Op.COPY, Op.IFNOTDONE,
-        Op.JMPB, Op.FORK, Op.SCAN, Op.MOVE,
+        pack(Op.HARVEST), pack(Op.HARVEST), pack(Op.ALLOC),
+        pack(Op.COPY), pack(Op.IFNOTDONE), pack(Op.JMPB, src=1),
+        pack(Op.FORK), pack(Op.SCAN, dst=1), pack(Op.MOVE, src=1),
     ]
+
+
+def _w(op, src=0, dst=0):
+    return pack(op, src, dst)
 
 
 def build_founder_palette() -> list[list[int]]:
@@ -224,40 +277,42 @@ def build_founder_palette() -> list[list[int]]:
         core,
         # two founders seeding the computer-system capabilities, in the same
         # style as the others: ingredients appended, not a working arrangement.
-        [*core, Op.PUBLISH, Op.CALL],
-        [*core, Op.WRITE],
-        [Op.HARVEST, *core],
-        [*core, Op.SCAN, Op.MOVE, Op.HARVEST],
-        [*core, Op.BUILD],
-        [*core, Op.SIGNAL],
-        [*core, Op.LISTEN, Op.MOVE, Op.HARVEST],
-        [*core, Op.STORE, Op.LOAD],
+        [*core, _w(Op.PUBLISH), _w(Op.CALL)],
+        [*core, _w(Op.WRITE)],
+        [_w(Op.HARVEST), *core],
+        [*core, _w(Op.SCAN, dst=1), _w(Op.MOVE, src=1), _w(Op.HARVEST)],
+        [*core, _w(Op.BUILD)],
+        [*core, _w(Op.SIGNAL)],
+        [*core, _w(Op.LISTEN, dst=1), _w(Op.MOVE, src=1), _w(Op.HARVEST)],
+        [*core, _w(Op.STORE, src=2), _w(Op.LOAD, src=2, dst=3)],
         # bus ingredients, in the same style as the rest: the words are present
         # and adjacent, but nothing here is a working publish/consume circuit.
-        [*core, Op.POST, Op.FETCH],
-        [*core, Op.LOCATE, Op.FETCH],
-        [*core, Op.LINK],
-        [*core, Op.BURN],
-        [*core, Op.OFFER],
-        [*core, Op.DEFINE, Op.MACRO0],
-        [*core, Op.STEAL],
-        [*core, Op.CORRUPT],
-        [*core, Op.INC, Op.PUSH, Op.ADD],
-        [*core, Op.INPUT, Op.INPUT, Op.OUTPUT],
-        [*core, Op.PEEK],
+        [*core, _w(Op.POST, src=6), _w(Op.FETCH, src=6, dst=7)],
+        [*core, _w(Op.LOCATE, dst=2), _w(Op.FETCH, src=2, dst=3)],
+        [*core, _w(Op.LINK)],
+        [*core, _w(Op.BURN)],
+        [*core, _w(Op.OFFER)],
+        [*core, _w(Op.DEFINE), _w(Op.MACRO0)],
+        [*core, _w(Op.STEAL)],
+        [*core, _w(Op.CORRUPT)],
+        [*core, _w(Op.INC), _w(Op.PUSH), _w(Op.ADD)],
+        [*core, _w(Op.INPUT, dst=4), _w(Op.INPUT, dst=5), _w(Op.OUTPUT, src=4)],
+        [*core, _w(Op.PEEK)],
         # COPYN gets a chance to import a neighbour word; COPY remains a
         # fallback when isolated, so this founder is independently viable.
-        [Op.HARVEST, Op.HARVEST, Op.ALLOC, Op.COPYN, Op.COPY,
-         Op.IFNOTDONE, Op.JMPB, Op.FORK, Op.SCAN, Op.MOVE],
-        [Op.HARVEST, Op.NOP, Op.HARVEST, Op.ALLOC, Op.COPY,
-         Op.IFNOTDONE, Op.JMPB, Op.FORK, Op.NOP, Op.SCAN, Op.MOVE],
-        [*core, Op.SALVAGE],
+        [_w(Op.HARVEST), _w(Op.HARVEST), _w(Op.ALLOC), _w(Op.COPYN), _w(Op.COPY),
+         _w(Op.IFNOTDONE), _w(Op.JMPB), _w(Op.FORK), _w(Op.SCAN, dst=1), _w(Op.MOVE, src=1)],
+        [_w(Op.HARVEST), _w(Op.NOP), _w(Op.HARVEST), _w(Op.ALLOC), _w(Op.COPY),
+         _w(Op.IFNOTDONE), _w(Op.JMPB), _w(Op.FORK), _w(Op.NOP), _w(Op.SCAN, dst=1), _w(Op.MOVE, src=1)],
+        [*core, _w(Op.SALVAGE)],
     ]
 
 
 def disassemble(genome: list[int], annotate: bool = True) -> str:
     lines = []
     for index, word in enumerate(genome):
-        name = ISA[word].name if 0 <= word < NUM_OPS else f"invalid({word})"
-        lines.append(f"{index:03d}: {name}" if annotate else f"{index}: {name}")
+        op, src, dst = unpack(word)
+        name = ISA[op].name if op < NUM_OPS else f"invalid({op})"
+        text = f"{name} r{src}->r{dst}"
+        lines.append(f"{index:03d}: {text}" if annotate else f"{index}: {text}")
     return "\n".join(lines)

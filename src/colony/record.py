@@ -46,7 +46,12 @@ def encode_positions(colony: Colony, width: int) -> str:
 
 def encode_genome(genome: list[int]) -> str:
     """One character per instruction. Genomes are short; this stays tiny."""
-    return "".join(GENOME_ALPHABET[op % len(GENOME_ALPHABET)] for op in genome)
+    # A word packs (op, src, dst); the glyph shows the opcode. Rendering the
+    # whole word would make identical instructions wired differently look
+    # like different instructions.
+    from .isa import unpack
+    return "".join(GENOME_ALPHABET[unpack(w)[0] % len(GENOME_ALPHABET)]
+                   for w in genome)
 
 
 def encode_energy(world: World) -> str:

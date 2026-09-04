@@ -13,7 +13,12 @@ from .record import encode_genome
 
 
 def genome_id(genome: list[int]) -> str:
-    return hashlib.sha256(bytes(genome)).hexdigest()[:16]
+    # A word packs (op, src, dst) and reaches 4095, so it no longer fits a byte.
+    # Two bytes each, little-endian, which keeps distinct wirings distinct: the
+    # same opcodes wired differently are genuinely different programs and must
+    # not collide onto one identity.
+    return hashlib.sha256(
+        b"".join(int(w).to_bytes(2, "little") for w in genome)).hexdigest()[:16]
 
 
 class LineageHistory:

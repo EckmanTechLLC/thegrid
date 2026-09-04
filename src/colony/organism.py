@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .isa import ISA, NUM_OPS, Op
+from .isa import (ISA, IMMEDIATE_JUMPS, NUM_OPS, Op, REG_COUNT, WORD_MAX,
+                  WRITES_DST, unpack)
 
 
 @dataclass
@@ -18,6 +19,12 @@ class Organism:
     energy: float = 32.0
     age: int = 0
     ip: int = 0
+    # Eight named registers instead of three implicit ones. a/b/c remain as the
+    # working values an instruction body sees: a is loaded from the word's src
+    # register before dispatch and written back to dst after, b is the dst
+    # register's prior value, so every existing instruction body works unchanged
+    # while the wiring becomes explicit in the genome.
+    regs: list[int] = field(default_factory=lambda: [0] * REG_COUNT)
     a: int = 0
     b: int = 0
     c: int = 1
@@ -112,7 +119,14 @@ class Organism:
         else:
             word = self.genome[self.ip % len(self.genome)]
             from_routine = False
-        op = Op(word) if 0 <= word < NUM_OPS else Op.NOP
+        opcode, src, dst = unpack(word)
+        op = Op(opcode) if 0 <= opcode < NUM_OPS else Op.NOP
+        # Wire the instruction up before running it.
+        self.a = self.regs[src]
+        self.b = self.regs[dst]
+        # A branch takes its distance from the operand field, never from a
+        # register another instruction could have overwritten.
+        self.c = src if op in IMMEDIATE_JUMPS else self.regs[src]
         if op in (Op.ADD, Op.SUB, Op.XOR, Op.LOAD, Op.STORE, Op.JMPR,
                   Op.POST, Op.FETCH, Op.LOCATE):
             name = ISA[op].name
@@ -358,7 +372,7 @@ class Organism:
         elif op == Op.CORRUPT and "predation" in colony.features:
             victim = colony.neighbor(self)
             if victim is not None and victim.genome:
-                victim.genome[self.b % len(victim.genome)] = self.a % NUM_OPS
+                victim.genome[self.b % len(victim.genome)] = self.a % WORD_MAX
                 self.corruptions = getattr(self, "corruptions", 0) + 1
                 victim.corrupted = getattr(victim, "corrupted", 0) + 1
                 colony.corruptions = getattr(colony, "corruptions", 0) + 1
@@ -403,9 +417,17 @@ class Organism:
         elif op == Op.WRITE:
             if self.genome:
                 pos = self.b % len(self.genome)
-                self.genome[pos] = self.a % NUM_OPS
+                self.genome[pos] = self.a % WORD_MAX
                 self.self_writes = getattr(self, "self_writes", 0) + 1
                 colony.self_writes = getattr(colony, "self_writes", 0) + 1
+        # Land the result on the wire the instruction named.
+        if op in WRITES_DST:
+            self.regs[dst] = self.a & 0xFF
+        elif op == Op.SWAP:
+            self.regs[src], self.regs[dst] = self.regs[dst], self.regs[src]
+        elif op == Op.PUSH:                       # now a plain register move
+            self.regs[dst] = self.regs[src]
+
         # ── royalty settlement ────────────────────────────────────────────
         # A routine is USEFUL if running it left the caller better off. The
         # publisher takes a cut OF THAT GAIN — a transfer, never newly minted —
