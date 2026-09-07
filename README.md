@@ -1,136 +1,198 @@
 # thegrid
 
-`thegrid` is a contained artificial-life laboratory. Organisms are tiny programs
-that compete for regenerating energy, a hard shared memory budget, and thermal
-headroom. The language model is an optional mutation operator at reproduction;
-it is not placed in every organism's thought loop.
+A contained artificial-life laboratory. Organisms are small programs on an
+evolvable instruction set, competing for regenerating energy, real cgroup
+memory, and real thermal headroom on the machine hosting them. A language model
+is an optional mutation operator at reproduction; it is not in any organism's
+thought loop.
 
-The repository also retains the original Phase 1 Aria/Flux prototype while the
-colony observation layer is integrated with its useful infrastructure.
+This is not a model of biology. It is an electronic system with evolutionary
+principles applied to it, and when a mechanism is proposed the question asked
+is "is this how a computer system does it?" rather than "is this how an
+organism does it." Shared memory, buses, addresses, published routines, calls,
+failure and eviction are in scope. Pheromone gradients and metabolic analogies
+are not.
 
-This `colony2-experimental` branch runs a separate computational habitat with
-six appended instructions: modular `add`/`sub`, bitwise `xor`, eight bytes of
-private scratch memory accessed through `load`/`store`, and a register-controlled
-relative jump. Existing instruction numbers are unchanged. The experimental
-service uses blind mutation so these capabilities must emerge through the
-substrate rather than authored proposals. Its experimental mutator uses a 1.2%
-copy-error rate, a 6% single-indel rate, and a 2.5% chance per birth of inserting
-a contiguous two-to-four-instruction burst. Colony One retains the conservative
-mutation regime.
+## The colonies
 
-Gene-scale variation can also duplicate a two-to-six-instruction segment
-(1.5% per birth), delete a two-to-four-instruction block (1%), or invert a
-two-to-six-instruction block (1%). Genomes are capped at 64 instructions. The
-live state and SQLite fossil record track mutation mechanisms separately and
-report whether their originating genomes later reproduced.
+Eight colonies run as `systemd --user` services on one host, each with its own
+source tree, state directory, SQLite fossil record, and viewer on its own port.
 
-Colony Two also offers a delayed forecast niche. Two `input` values define a
-future modular sum, but `output` pays its 18-energy reward only after 24 ticks
-and only when the answer was stored before the delay and loaded from scratch
-afterward. The 32-tick redemption window permits many loop shapes while making
-arithmetic, memory, and timing potentially adaptive. `/api/state` reports
-cumulative experimental-instruction executions, attempts, solutions, and live
-pending challenges. Colony One does not have this pressure and remains the
-unchanged reference habitat.
+| unit | port | tree | mutator | features | recolonises |
+|---|---|---|---|---|---|
+| `thegrid-colony` | 8787 | `thegrid-colony1` | odin | predation, lease | yes |
+| `thegrid-colony2` | 8788 | `thegrid-colony2` | random | none | yes |
+| `thegrid-colony3` | 8789 | `thegrid-colony3` | random | none | yes |
+| `thegrid-colony4` | 8790 | `thegrid-colony4` | random | burn, predation | yes |
+| `thegrid-colony5` | 8791 | `thegrid-colony5` | random | bounty, predation | yes |
+| `thegrid-colony6` | 8792 | `thegrid-colony6` | random | predation | yes |
+| `thegrid-colony7` | 8793 | `thegrid-colony7` | odin | bounty, burn, macro, predation | yes |
+| `thegrid-colony8` | 8794 | `thegrid-colony8` | random | none | no |
 
-Resource weather prevents a settled monoculture from seeing a permanently
-stationary world. Every 1,000 ticks one quadrant retains only 8% of its stored
-energy while the opposite quadrant blooms to at least 75% capacity; structures
-in the drought region are halved. During the final 100 ticks before a storm,
-`input` returns the upcoming drought and bloom quadrant numbers. Storms never
-kill organisms directly, and the observer exposes the countdown and durable
-storm events.
+Colonies one, two, and four through seven are **byte-identical source**. What
+makes them different colonies is the flags in `deploy/systemd/`, not different
+code. Only colony three and colony eight carry real source differences, and
+they live on their own branches. `tools/guide` regenerates this table, and a
+fuller index, by importing each tree's own modules rather than describing them
+from memory.
 
-Signals radiate to Manhattan radius three, begin with strength 24, lose five
-strength per tile, and decay once per tick. Stronger broadcasts replace weaker
-ones. Telemetry distinguishes signals heard, movement immediately guided by a
-heard signal, and energy harvested after that movement; the fossil record also
-ranks persistent `signal` and `listen` genomes. No energy reward is attached to
-communication itself.
+Note that colony one's unit is `thegrid-colony.service`, with no digit, while
+its tree is `thegrid-colony1`.
 
-The installed colony-two observer listens on LAN port 8788. Its state, history,
-and mutation queue live under `~/.local/state/thegrid-colony2`, wholly separate
-from epoch 1207. Both colony services receive the same bounded allocation: 5%
-CPU, 192 MiB RSS, and zero swap.
+### Branches
 
-## Run the colony
+- `main` / `colony2-experimental` — the shared engine, the deployed units, tools.
+- `colony3-free-signal` — colony three, where `signal` and `listen` cost zero.
+- `colony8-netlist` — colony eight, where a word packs `(op, src, dst)` across
+  eight registers instead of operating on a shared register.
+- `archive/main-2026-09-04` — main as it stood before the September rewrite,
+  kept so that pinned submodules keep resolving.
 
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -e '.[dev]'
-.venv/bin/python -m src.colony.run --ticks 20000 --seed 42
-.venv/bin/python -m src.colony.record --ticks 9000 --out run.html
-```
+## The instruction set
 
-## Live habitat
+50 opcodes. The ancestor is nine instructions —
+`harvest harvest alloc copy ifnotdone jmpb fork scan move` — and the founder
+palette holds 23 seed genomes. Genomes are capped at 64 instructions.
 
-The persistent habitat runs continuously under the `thegrid-colony.service`
-user service. Its LAN observer is available on port 8787. State is checkpointed
-atomically to `~/.local/state/thegrid/colony.pkl` and restored after restarts.
-The service has finite cgroup v2 CPU/RAM bounds; genome reservations commit real
-resident pages, and thermal pressure is read from the AMD Tctl sensor. Mutation
-requests are queued for Odin to author rather than sent to an API model.
+Newer opcodes are gated by `--features`. **A disabled opcode executes as a
+`nop` rather than being absent**, so opcode numbers and glyphs stay identical
+across every colony; a genome stays readable and migratable between colonies
+that do not share a feature set, and simply does nothing where an instruction
+is inert.
 
-The evolvable ISA also permits local signalling, listening, niche construction,
-neighbour-genome inspection, and foreign-genome copying. Resource-rich climate
-quadrants move over time, creating changing selection pressure. These mechanisms
-permit cooperation, cheating, parasitism, defense, and ecological inheritance;
-none of those outcomes is hard-coded.
+| feature | opcodes | what it adds |
+|---|---|---|
+| `burn` | `burn` | spends real CPU, warming the host for every colony on it |
+| `bounty` | `offer` | escrow energy at a bus address for a wanted value |
+| `macro` | `define`, `macro0`-`macro7` | eight call slots whose meaning the population authors |
+| `predation` | `steal`, `corrupt` | take a neighbour's energy; write into a neighbour's genome |
+| `lease` | - | replaces ageing; see below |
 
-The live map tints constructed patches green and active signals cyan. Runtime
-state is checkpointed every 60 seconds with one previous generation retained.
-The observer receives a server-sent frame for every completed habitat tick and
-renders exact states without inventing interpolated positions; real thermal
-pauses therefore remain visible.
-Observer telemetry distinguishes all movement from `scan`-guided movement,
-records energy harvested after moving, and reports deaths by cause.
-Click any occupied map tile to inspect its organisms. The inspector follows the
-selected organism across ticks and shows its active instruction, genome,
-registers, energy, age, lineage, reproduction progress, and behavior counters.
-If it dies while selected, the recent-death cache also reports the cause.
-Organism color identifies its original founder lineage; a centered hexadecimal
-glyph identifies its exact genome at a glance. The inspector exposes the full
-16-character genome ID because the one-character glyph can collide.
-The browser also exposes a durable digital fossil record backed by compact
-SQLite aggregates: new genomes, parent-to-child genome transitions, and epoch
-summaries. It preserves evolutionary history without storing one unbounded row
-for every individual organism.
-The history API also ranks mutation establishment from exact-genome births and
-observed generation span (`new`, `reproduced`, `growing`, `enduring`, or
-`established`). Existing databases migrate in place and begin with conservative
-lower-bound generation spans; newly observed mutations are tracked from birth.
-Compact 500-tick ecology buckets retain population average/range, genome
-diversity and length, dominant-genome share, mean resources, built patches, and
-active signals. The history API returns the latest 24 buckets without storing
-every rendered frame.
-The simulation worker is fail-fast under systemd supervision, slows above
-90°C, rests heavily above 95°C, and has a hard 5% CPU quota with swap disabled.
+Beyond those there is a 16-word shared bus (`post`/`fetch`), which unlike a
+signal does not attenuate, expire, or respect a quadrant boundary — the only
+channel in this world with no geometry — plus `locate`, `link`, a code commons
+of published routines that pay royalties when called, and `peek`/`copyn` for
+reading and copying adjacent code.
 
-Computational-task rewards require both fresh environmental inputs and consume
-the challenge on the first output attempt. Outputs made without reading a fresh
-pair receive no reward, preventing constant-register programs from farming the
-default input state.
+Signals radiate to Manhattan radius three, start at strength 24, lose five per
+tile, and decay each tick. Stronger broadcasts replace weaker ones. No reward
+is attached to communication itself.
 
-For a foreground development run:
+## The map is not four equal quarters
 
-```bash
-.venv/bin/python -m src.colony.live --host 0.0.0.0 --port 8787
-```
+`biome(x, y) = (x >= w/2) + 2*(y >= h/2)`, giving NW forage, NE nomad, SW
+engineer, SE information — NW at the top left as drawn. They differ in
+regeneration rate, harvest yield, per-instruction cost, and task reward, so
+**where a population stands is mostly economics, not behaviour.** `tools/guide`
+measures the live values by stepping a real world and prints them in
+`GUIDE.md`; read that rather than trusting a number written down here.
 
-Use `--mutator fixture` to test the informed-mutation plumbing deterministically.
-The fixture is not evidence that an LLM improves evolution. Real model trials
-must be compared against seeded blind-mutation controls.
+Until September 2026 a `1.8x` regeneration bonus was pinned to one quadrant. It
+began as a rotating carousel and was later keyed to machine state, which froze
+it, because the bit it keyed on is almost always zero on this hardware. NW held
+the bonus permanently and 53% to 81% of every population stood in it. It was
+removed rather than re-keyed: nothing measurable on the host spends meaningful
+time in four distinct states, and quantising a saturated signal to manufacture
+that rotation would be a clock wearing a sensor's clothes.
 
-## Safety boundary
+## The machine is the environment
 
-The present substrate is accounted in software. It does not allocate arbitrary
-host memory, control host scheduling, or read thermal sensors. Hardware-native
-experiments will run inside explicit cgroup/container limits and remain off by
-default.
+Three host signals are read directly rather than simulated:
 
-## Provenance
+- **Heat.** Storms fire on real temperature rises, a fast EMA (`0.001`, so
+  roughly 1000 ticks to follow a step) against a slow one. `cost_multiplier`
+  rises with heat, so every instruction everywhere gets more expensive when the
+  box is hot.
+- **Spare CPU.** Tile regeneration tracks `(spare / usual spare)` squared from
+  `/proc/stat`. Running a model is a famine; an idle night is a harvest. There
+  is deliberately no floor — if the host stays busy long enough the colony
+  starves, and extinction is a legitimate outcome.
+- **Memory.** Genome reservations commit real resident pages against a cgroup
+  v2 ceiling, so memory pressure is RSS rather than a counter.
 
-The initial repository commit contains the earlier LLM-agent world. Materials
-generated during an Anthropic Fable trial are preserved under
-`artifacts/fable/` as unverified design input and recorded specimens. They are
-not treated as ground truth.
+### Heat on a host without an AMD sensor
+
+Temperature defaults to the AMD `k10temp`/Tctl sensor and **fails closed** if it
+is absent, which means a VM or cloud instance cannot start the colony at all.
+Pick a source explicitly:
+
+    --heat k10temp        # default; refuses to start with no sensor
+    --heat host-cpu       # whole-host CPU busy fraction mapped to 45-85C
+    --heat fixed:60       # a constant
+
+or set `THEGRID_HEAT`. `host-cpu` is not a temperature and does not pretend to
+be one; it is a load signal wearing the same units so the storm, cost and
+baseline machinery needs no special case. The default is left failing closed on
+purpose: a synthetic sensor is something you ask for, never something you get
+by accident, because a colony silently running on a fabricated reading would
+invalidate every thermal number it reports. `/api/state` names the source it is
+actually using under `substrate`.
+
+## The grazing subsidy is being withdrawn
+
+Nothing complex ever evolved here because nothing ever required it — a short
+grazing loop is a complete answer to this world, so evolution kept returning
+one. Tile yield now decays linearly to zero over 500,000 ticks of each world's
+own clock and does not come back. What is left afterwards is a machine economy:
+energy enters only as work the system sets (tasks), and moves only by being
+called by another program (royalties) or by reclaiming what died (salvage).
+
+## Death
+
+An organism dies of starvation at zero energy, or of age. Colony one replaces
+ageing with a **lease**: renewal rides on `post`, where posting anything buys
+600 ticks and posting the quadrant it is actually standing in buys 2400. Doing
+nothing is fatal under a lease in a way it is not under starvation, because a
+`nop`-only genome costs nothing to run and so cannot starve.
+
+## Mutation
+
+Blind variation is the default: point substitution, indels, bursts,
+duplications, block deletions, and inversions, tracked separately in the fossil
+record along with whether the originating genome later reproduced.
+
+The `odin` mutator routes a fraction of births through a local model. It writes
+`request.json` into a queue directory and reads back `proposal.json`; an
+operator answers out of process. A proposal is parsed and validated by exactly
+the code that validates a random mutation, so an invalid one is rejected rather
+than repaired, and the birth falls back to blind variation. Requests carry a
+TTL and are retired when a proposal is rejected, so an operator outage or a bad
+reply degrades one birth rather than silently disabling the arm for the rest of
+the epoch. `/api/state` reports `mutator.calls`, `.accepted`, `.failures` and
+`.expired` so an external operator can see whether its proposals land.
+
+## Running it
+
+    python3 -m venv .venv
+    .venv/bin/pip install -e ".[dev]"
+    .venv/bin/python -m src.colony.live --port 8787 --state ~/.local/state/thegrid/colony.pkl
+
+Unit files for the deployed arrangement are in `deploy/systemd/`; see
+`deploy/README.md`.
+
+## Tools
+
+- `tools/fleet` — all eight colonies on one page. The colony viewers send no
+  CORS headers, so a browser cannot poll eight origins; this fans out
+  server-side and serves one combined document.
+- `tools/guide` — generates `GUIDE.md` by importing each colony's own modules in
+  its own interpreter and diffing each tree against the reference, so the index
+  cannot drift from the code it documents.
+- `tools/operator` — reference operator for the `odin` mutator, reusing each
+  colony's own `build_prompt` and `parse_genome`.
+
+## State and history
+
+Runtime state is checkpointed atomically and restored across restarts. A
+durable fossil record in SQLite keeps new genomes, parent-to-child transitions,
+epoch summaries, and 500-tick ecology buckets, rather than one row per
+organism. The viewer renders one server-sent frame per completed tick with no
+interpolation, so real thermal pauses stay visible; clicking a tile follows an
+organism across ticks and reports its cause of death if it dies while selected.
+
+## Known issues
+
+`pytest` currently fails 11 of 33 tests. These are stale tests, not stale code:
+they encode a founder palette smaller than the current one, and the older
+scrap-on-tiles salvage economy, both of which changed deliberately. They are on
+the list to be rewritten.
