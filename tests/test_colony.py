@@ -10,6 +10,8 @@ from src.colony.history import LineageHistory
 from src.colony.tasks import TemporalTaskEnvironment
 import json
 import random
+import pytest
+
 from collections import Counter
 from types import SimpleNamespace
 
@@ -44,7 +46,7 @@ def test_ancestor_is_valid():
 
 def test_diverse_founders_are_unique_viable_and_fit_large_map_encoding():
     palette = build_founder_palette()
-    assert len(palette) == len({tuple(genome) for genome in palette}) == 13
+    assert len(palette) == len({tuple(genome) for genome in palette})
     for lineage, genome in enumerate(palette):
         world = World(WorldConfig(width=48, height=48, tile_regen=0.5,
                                   memory_cap=500, seed=100 + lineage))
@@ -64,24 +66,27 @@ def test_diverse_founders_are_unique_viable_and_fit_large_map_encoding():
 
 def test_diverse_epoch_seeds_every_lineage_on_a_rich_distinct_patch():
     world = World(WorldConfig(width=48, height=48, seed=42))
+    palette = build_founder_palette()
     colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
-                    seed=42, founders=13,
-                    founder_genomes=build_founder_palette())
+                    seed=42, founders=len(palette),
+                    founder_genomes=palette)
     positions = {(o.x, o.y) for o in colony.organisms}
-    assert len(positions) == 13
+    assert len(positions) == len(palette)
     assert all(world.tile_energy(o.x, o.y) == world.config.tile_capacity
                for o in colony.organisms)
     assert all(o.energy == 48.0 for o in colony.organisms)
 
 
 def test_epoch_can_inoculate_four_organisms_per_lineage():
+    palette = build_founder_palette()
+    expected = len(palette) * 4
     colony = Colony(World(WorldConfig(width=48, height=48, seed=42)),
-                    seed=42, founders=13,
-                    founder_genomes=build_founder_palette(), founder_copies=4)
+                    seed=42, founders=len(palette),
+                    founder_genomes=palette, founder_copies=4)
     counts = Counter(o.lineage for o in colony.organisms)
-    assert len(colony.organisms) == 52
-    assert counts == Counter({lineage: 4 for lineage in range(13)})
-    assert len({(o.x, o.y) for o in colony.organisms}) == 52
+    assert len(colony.organisms) == expected
+    assert counts == Counter({lineage: 4 for lineage in range(len(palette))})
+    assert len({(o.x, o.y) for o in colony.organisms}) == expected
 
 
 def test_live_habitat_restores_checkpoint(tmp_path):
@@ -193,6 +198,10 @@ def test_task_reward_requires_two_fresh_inputs_and_is_single_use():
     assert organism.energy < before
     assert organism.tasks_solved == {}
 
+    # Task pools start empty and refill once per tick. These tests drive
+    # execute() directly rather than stepping, so without this the solve is
+    # priced at min(want, empty pool) and correctly pays nothing.
+    colony.tasks.decay_rates()
     organism.genome = [Op.INPUT]
     organism.execute(colony)
     organism.execute(colony)
@@ -365,6 +374,10 @@ def test_temporal_forecast_requires_delayed_scratch_recall():
     assert organism.forecasts_solved == 0
     assert organism.energy < before
 
+    # Task pools start empty and refill once per tick. These tests drive
+    # execute() directly rather than stepping, so without this the solve is
+    # priced at min(want, empty pool) and correctly pays nothing.
+    colony.tasks.decay_rates()
     world.tick = organism.forecast_due_tick
     organism.genome = [Op.LOAD]
     organism.execute(colony)
@@ -559,24 +572,35 @@ def test_biome_boundaries_have_narrow_migration_corridors():
     assert world.move(1, 1, 1, 0) == (2, 1)  # free within a biome
 
 
-def test_death_leaves_decaying_scrap_that_salvage_reclaims():
+def test_death_funds_the_reclaim_pool_and_salvage_only_ever_drains_it():
     world = World(WorldConfig(width=8, height=8, memory_cap=100, seed=32))
     colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
                     seed=32, founders=1)
     organism = colony.organisms[0]
     x, y = organism.x, organism.y
+    # nop costs nothing, so a nop-only genome cannot starve however small its
+    # energy is - that is exactly why the lease exists. Empty the tank instead.
     organism.genome = [Op.NOP] * 20
-    organism.energy = 0.01
+    organism.energy = 0.0
     colony.step()
-    deposited = world.scrap[y][x]
+
+    deposited = world.reclaim_pool
     assert deposited > 0
     assert colony.scrap_deposited > 0
-    gained = world.salvage(x, y)
-    assert gained > 0
-    assert world.scrap[y][x] < deposited
-    remaining = world.scrap[y][x]
-    world.step()
-    assert world.scrap[y][x] < remaining
+
+    # Salvage is a transfer. Whatever it hands out must leave the pool, in
+    # every quadrant: a multiplier here once minted 25% on top and a colony
+    # promptly evolved a no-harvest salvage loop to farm it.
+    for corner in ((1, 1), (6, 1), (1, 6), (6, 6)):
+        before = world.reclaim_pool
+        gained = world.salvage(*corner)
+        assert gained == pytest.approx(before - world.reclaim_pool)
+        assert world.reclaim_pool >= 0
+
+    # And an empty pool pays nothing rather than going negative.
+    world.reclaim_pool = 0.0
+    assert world.salvage(x, y) == 0.0
+    assert world.reclaim_pool == 0.0
 
 
 def test_salvage_instruction_is_a_costly_contextual_advantage():
@@ -584,7 +608,7 @@ def test_salvage_instruction_is_a_costly_contextual_advantage():
     colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
                     seed=33, founders=1, founder_genomes=[[Op.SALVAGE]])
     organism = colony.organisms[0]
-    world.scrap[organism.y][organism.x] = 5
+    world.reclaim_pool = 5.0
     before = organism.energy
     colony.step()
     assert organism.salvaged > 0

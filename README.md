@@ -190,9 +190,13 @@ organism. The viewer renders one server-sent frame per completed tick with no
 interpolation, so real thermal pauses stay visible; clicking a tile follows an
 organism across ticks and reports its cause of death if it dies while selected.
 
-## Known issues
+## License
 
-`pytest` currently fails 11 of 33 tests. These are stale tests, not stale code:
-they encode a founder palette smaller than the current one, and the older
-scrap-on-tiles salvage economy, both of which changed deliberately. They are on
-the list to be rewritten.
+MIT. See `LICENSE`.
+
+## Tests
+
+`pytest` passes 33/33 on every colony except colony eight, whose packed
+`(op, src, dst)` encoding the shared test file does not yet speak - it builds
+genomes as bare opcodes, so 8 tests there fail on the encoding rather than on
+behaviour. Adapting them is outstanding work.
