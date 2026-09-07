@@ -50,6 +50,9 @@ class Colony:
         self.features = set(features or ())
         self.burns = 0
         self.steals = 0
+        self.lease_renewals = 0
+        self.lease_exact = 0
+        self.lease_expired = 0
         self.stolen = 0.0
         self.corruptions = 0
         self.bounties_offered = 0
@@ -89,6 +92,7 @@ class Colony:
                 founder = Organism(
                     id=self._id(), genome=list(genome), x=x, y=y,
                     lineage=lineage, energy=48.0,
+                    lease_expires=self.world.tick + self.LEASE_FULL,
                 )
                 self.organisms.append(founder)
                 self.lifecycle_events.append({"kind": "birth", "tick": self.world.tick,
@@ -111,7 +115,18 @@ class Colony:
             organism.execute(self)
         survivors = []
         for organism in self.organisms:
-            cause = "starvation" if organism.energy <= 0 else ("senescence" if organism.age >= self.max_age else None)
+            if organism.energy <= 0:
+                cause = "starvation"
+            elif "lease" in self.features:
+                # No senescence here: the lease is the only clock.
+                cause = ("lease" if self.world.tick > organism.lease_expires
+                         else None)
+                if cause:
+                    self.lease_expired += 1
+            elif organism.age >= self.max_age:
+                cause = "senescence"
+            else:
+                cause = None
             if cause:
                 self.scrap_deposited += self.world.deposit_scrap(
                     organism.x, organism.y, len(organism.genome), organism.energy)
@@ -171,7 +186,8 @@ class Colony:
             return
         child = Organism(self._id(), proposal, x, y, parent.lineage,
                            generation=parent.generation + 1,
-                           energy=self.CHILD_ENERGY)
+                           energy=self.CHILD_ENERGY,
+                           lease_expires=self.world.tick + self.LEASE_FULL)
         parent.energy -= self.CHILD_ENERGY
         parent.births += 1
         self.births += 1
@@ -190,6 +206,15 @@ class Colony:
                 self.next_group += 1
                 for member in others:
                     self._copy_member(member, child, offspring_group)
+
+    # An obligation rather than a need or a desire. Programs do not age - real
+    # ones run until killed, crashed or reclaimed - so where this is enabled it
+    # replaces senescence outright: an organism must send a heartbeat or be
+    # reclaimed for failing to. It also kills the immortal-nop strategy, which
+    # only ever worked because nop costs nothing and starvation was the only
+    # pressure that could reach it.
+    LEASE_FULL = 2400          # a correct heartbeat buys a full term
+    LEASE_PARTIAL = 600        # any heartbeat at all buys a quarter of one
 
     MAX_GROUP = 8   # a bound unit cannot exceed this; a bound on cost, not a design
 
@@ -265,7 +290,8 @@ class Colony:
         x, y = self.world.wrap(anchor.x + dx, anchor.y + dy)
         child = Organism(self._id(), proposal, x, y, member.lineage,
                          generation=member.generation + 1,
-                         energy=self.CHILD_ENERGY)
+                         energy=self.CHILD_ENERGY,
+                         lease_expires=self.world.tick + self.LEASE_FULL)
         child.group = group
         member.energy -= self.CHILD_ENERGY
         member.births += 1
