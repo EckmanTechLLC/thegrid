@@ -1,5 +1,70 @@
 # thegrid
 
+> **Layout as of September 2026.** The sections below this one predate the
+> current arrangement and describe a two-colony world; treat them as history.
+
+Eight colonies run as `systemd --user` services on one machine, each with its
+own source tree, state directory, SQLite fossil record and viewer. They are
+mostly the *same engine*: colonies one, two, four, five, six and seven are
+byte-identical source, and differ only in the flags their unit file passes.
+Colony three and colony eight carry real code differences and live on their own
+branches.
+
+| unit | port | tree | mutator | features | recolonises |
+|---|---|---|---|---|---|
+| `thegrid-colony` | 8787 | `thegrid-colony1` | odin | predation, lease | yes |
+| `thegrid-colony2` | 8788 | `thegrid-colony2` | random | none | yes |
+| `thegrid-colony3` | 8789 | `thegrid-colony3` | random | none | yes |
+| `thegrid-colony4` | 8790 | `thegrid-colony4` | random | burn, predation | yes |
+| `thegrid-colony5` | 8791 | `thegrid-colony5` | random | bounty, predation | yes |
+| `thegrid-colony6` | 8792 | `thegrid-colony6` | random | predation | yes |
+| `thegrid-colony7` | 8793 | `thegrid-colony7` | odin | bounty, burn, macro, predation | yes |
+| `thegrid-colony8` | 8794 | `thegrid-colony8` | random | none | no |
+
+A disabled feature does not remove its opcodes — they execute as `nop`. Opcode
+numbers and glyphs therefore stay identical everywhere, so a genome remains
+readable and migratable across colonies that do not share a feature set.
+
+## Branches
+
+- `main` — the shared engine, the deployed unit files, and the tools.
+- `colony3-free-signal` — colony three, where `signal` and `listen` cost zero.
+- `colony8-netlist` — colony eight, where an instruction packs
+  `(op, src, dst)` into one word over eight registers instead of operating on
+  a shared register.
+
+## The map is not four equal quarters
+
+`biome(x, y) = (x >= w/2) + 2*(y >= h/2)`, giving NW forage, NE nomad, SW
+engineer, SE information. They differ in regeneration rate, harvest yield, and
+per-instruction cost, so where a population stands is mostly economics rather
+than behaviour. `tools/guide` measures the current values by stepping a real
+world rather than transcribing them, and prints them in `GUIDE.md`.
+
+Until September 2026 a `1.8x` regeneration bonus was pinned to one quadrant.
+It began as a rotating carousel and was later keyed to machine state, which
+froze it, because the bit it keyed on is almost always zero on this hardware.
+NW held it permanently and 53% to 81% of every population stood there. It has
+been removed rather than re-keyed: nothing measurable on the box spends
+meaningful time in four distinct states, and quantising a saturated signal to
+manufacture that rotation would be a clock wearing a sensor's clothes.
+
+## Tools
+
+- `tools/fleet` — one page showing all eight colonies. The colony viewers send
+  no CORS headers, so a browser cannot poll eight origins; this fans out
+  server-side and serves one combined document.
+- `tools/guide` — generates `GUIDE.md` by importing each colony's own modules
+  in its own interpreter and diffing each tree against the reference, so the
+  index cannot drift from the code it documents.
+- `tools/operator` — routes a fraction of births through a local model, reusing
+  each colony's own `build_prompt` and `parse_genome` so a model-authored
+  genome is validated by exactly the code that validates a random one.
+
+---
+
+# thegrid
+
 `thegrid` is a contained artificial-life laboratory. Organisms are tiny programs
 that compete for regenerating energy, a hard shared memory budget, and thermal
 headroom. The language model is an optional mutation operator at reproduction;

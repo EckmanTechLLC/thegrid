@@ -1,0 +1,20 @@
+[Unit]
+Description=The Grid fleet dashboard
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/etl/odin/thegrid-fleet
+ExecStart=/usr/bin/python3 /home/etl/odin/thegrid-fleet/fleet.py
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+MemoryMax=256M
+CPUQuota=25%
+
+[Install]
+WantedBy=default.target
