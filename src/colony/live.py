@@ -26,6 +26,7 @@ from .isa import (ISA, NAME_TO_OP, Op, SELF_SUFFICIENT, build_ancestor,
 from .odin_operator import OdinMutator
 from .record import ALPHABET, encode_energy, encode_genome, encode_positions
 from .tasks import TemporalTaskEnvironment
+from . import substrate as substrate_module
 from .substrate import SubstrateWorld
 from .world import WorldConfig
 
@@ -487,7 +488,16 @@ class Habitat:
             "memoryBytes": getattr(world, "cgroup_memory_current", 0),
             "memoryMaxBytes": getattr(world, "cgroup_memory_max", 0),
             "cpuUsageUsec": getattr(world, "cpu_usage_usec", 0),
-            "substrate": "linux-cgroup-v2 + AMD k10temp" if self.physical else "test",
+            "substrate": (f"linux-cgroup-v2 + {substrate_module.heat_description}"
+                          if self.physical else "test"),
+            # Whether an external operator's proposals are actually landing is
+            # invisible from outside without this: a rejected proposal and a
+            # never-answered request both look exactly like blind mutation.
+            "mutator": {"kind": self.mutator_kind,
+                        "calls": getattr(colony.mutator, "calls", 0),
+                        "accepted": getattr(colony.mutator, "accepted", 0),
+                        "failures": getattr(colony.mutator, "failures", 0),
+                        "expired": getattr(colony.mutator, "expired", 0)},
             "energy": encode_energy(world),
             "biomeField": "".join(str(world.biome(x, y))
                                     for y in range(world.config.height)
@@ -890,6 +900,9 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--ticks-per-second", type=int, default=100)
     parser.add_argument("--mutator", choices=("odin", "random"), default="odin")
+    parser.add_argument("--heat", default=os.environ.get("THEGRID_HEAT", "k10temp"),
+                        help="where machine heat is read from: k10temp (default, fails "
+                             "closed if absent), host-cpu, or fixed:<celsius>")
     parser.add_argument("--retire-current-epoch", action="store_true")
     parser.add_argument("--name", default=None,
                         help="display name; defaults to the state directory")
