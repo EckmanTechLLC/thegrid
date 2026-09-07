@@ -15,6 +15,16 @@ from .mutation import ExperimentalMutator
 
 
 class OdinMutator:
+    # Class defaults, not just instance state. A live colony restores its
+    # mutator from a pickled checkpoint, so an instance written before these
+    # fields existed unpickles without them and every attribute added here
+    # after the fact would raise on first use. Colony one crash-looped on
+    # exactly that - AttributeError: no attribute 'request_ttl' - the first
+    # time it saw a pending request after the field was introduced. Declaring
+    # them on the class makes an old checkpoint fall back rather than break.
+    request_ttl = 600.0
+    expired = 0
+
     def __init__(self, queue: Path, rate: float = 0.05, energy_cost: float = 40.0,
                  request_ttl: float = 600.0):
         self.queue = queue
