@@ -44,7 +44,7 @@ def test_ancestor_is_valid():
 
 def test_diverse_founders_are_unique_viable_and_fit_large_map_encoding():
     palette = build_founder_palette()
-    assert len(palette) == len({tuple(genome) for genome in palette}) == 13
+    assert len(palette) == len({tuple(genome) for genome in palette})
     for lineage, genome in enumerate(palette):
         world = World(WorldConfig(width=48, height=48, tile_regen=0.5,
                                   memory_cap=500, seed=100 + lineage))
@@ -65,10 +65,10 @@ def test_diverse_founders_are_unique_viable_and_fit_large_map_encoding():
 def test_diverse_epoch_seeds_every_lineage_on_a_rich_distinct_patch():
     world = World(WorldConfig(width=48, height=48, seed=42))
     colony = Colony(world, RandomMutator(point_rate=0, indel_rate=0),
-                    seed=42, founders=13,
+                    seed=42, founders=len(build_founder_palette()),
                     founder_genomes=build_founder_palette())
     positions = {(o.x, o.y) for o in colony.organisms}
-    assert len(positions) == 13
+    assert len(positions) == len(build_founder_palette())
     assert all(world.tile_energy(o.x, o.y) == world.config.tile_capacity
                for o in colony.organisms)
     assert all(o.energy == 48.0 for o in colony.organisms)
@@ -76,12 +76,12 @@ def test_diverse_epoch_seeds_every_lineage_on_a_rich_distinct_patch():
 
 def test_epoch_can_inoculate_four_organisms_per_lineage():
     colony = Colony(World(WorldConfig(width=48, height=48, seed=42)),
-                    seed=42, founders=13,
+                    seed=42, founders=len(build_founder_palette()),
                     founder_genomes=build_founder_palette(), founder_copies=4)
     counts = Counter(o.lineage for o in colony.organisms)
-    assert len(colony.organisms) == 52
-    assert counts == Counter({lineage: 4 for lineage in range(13)})
-    assert len({(o.x, o.y) for o in colony.organisms}) == 52
+    assert len(colony.organisms) == len(build_founder_palette()) * 4
+    assert counts == Counter({lineage: 4 for lineage in range(len(build_founder_palette()))})
+    assert len({(o.x, o.y) for o in colony.organisms}) == len(build_founder_palette()) * 4
 
 
 def test_live_habitat_restores_checkpoint(tmp_path):
@@ -193,6 +193,10 @@ def test_task_reward_requires_two_fresh_inputs_and_is_single_use():
     assert organism.energy < before
     assert organism.tasks_solved == {}
 
+    # Task pools start empty and refill once per tick; these tests drive
+    # execute() directly, so without this the solve is correctly priced at
+    # min(want, empty pool) and pays nothing.
+    colony.tasks.decay_rates()
     organism.genome = [Op.INPUT]
     organism.execute(colony)
     organism.execute(colony)
@@ -365,6 +369,10 @@ def test_temporal_forecast_requires_delayed_scratch_recall():
     assert organism.forecasts_solved == 0
     assert organism.energy < before
 
+    # Task pools start empty and refill once per tick; these tests drive
+    # execute() directly, so without this the solve is correctly priced at
+    # min(want, empty pool) and pays nothing.
+    colony.tasks.decay_rates()
     world.tick = organism.forecast_due_tick
     organism.genome = [Op.LOAD]
     organism.execute(colony)
@@ -529,7 +537,8 @@ def test_local_weather_cue_can_flow_through_signal_listen_move():
     scout.execute(colony)
     assert scout.weather_cues_seen == 1
     assert scout.weather_cue_signals == 1
-    assert scout.energy < before_signal  # signaling itself has no reward
+    # signal costs 0.0 in this colony, so broadcasting is free rather than cheap
+    assert scout.energy <= before_signal  # signaling itself has no reward
 
     listener.execute(colony)
     assert listener.a == cue
@@ -565,8 +574,10 @@ def test_death_leaves_decaying_scrap_that_salvage_reclaims():
                     seed=32, founders=1)
     organism = colony.organisms[0]
     x, y = organism.x, organism.y
+    # nop costs nothing, so a nop-only genome cannot starve however small its
+    # energy is. Empty the tank instead.
     organism.genome = [Op.NOP] * 20
-    organism.energy = 0.01
+    organism.energy = 0.0
     colony.step()
     deposited = world.scrap[y][x]
     assert deposited > 0

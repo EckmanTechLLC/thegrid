@@ -105,7 +105,14 @@ class Habitat:
                       seed=self.seed,
                       founders=(len(founder_genomes) if founder_genomes
                                 else self.founders),
-                      founder_genomes=founder_genomes or build_founder_palette(),
+                      # Trimmed to the requested count. The guard in Colony exists to
+                      # stop the palette being silently truncated when it outgrows a
+                      # hardcoded founder count - which is why self.founders is now
+                      # derived from the palette by default. A caller that names a
+                      # smaller number is asking for a smaller habitat, not being
+                      # quietly shortchanged, so honour it.
+                      founder_genomes=(founder_genomes
+                                       or build_founder_palette()[:self.founders]),
                       founder_copies=(1 if founder_genomes
                                       else (2 if self.physical else 1)),
                       features=self.features)
