@@ -134,8 +134,12 @@ def record(ticks: int, every: int, seed: int, width: int, height: int,
         "mutator": mutator_kind,
         "isa": [ins.name for ins in ISA],
         "ancestor": encode_genome(build_ancestor()),
+        # Was gated on isinstance(mutator, LLMMutator), so OdinMutator - which
+        # keeps the same three counters and is not a subclass - always recorded
+        # null. Ask for the counters, not for the class.
         "llm": ({"calls": mutator.calls, "accepted": mutator.accepted,
-                 "failures": mutator.failures} if isinstance(mutator, LLMMutator) else None),
+                 "failures": mutator.failures, "kind": type(mutator).__name__}
+                if hasattr(mutator, "accepted") else None),
         "frames": frames,
         "events": events,
         "dominant": {

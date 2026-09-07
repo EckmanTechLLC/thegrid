@@ -15,10 +15,18 @@ from .mutation import ExperimentalMutator
 
 
 class OdinMutator:
-    def __init__(self, queue: Path, rate: float = 0.05, energy_cost: float = 40.0):
+    def __init__(self, queue: Path, rate: float = 0.05, energy_cost: float = 40.0,
+                 request_ttl: float = 600.0):
         self.queue = queue
         self.rate = rate
         self.energy_cost = energy_cost
+        # An unanswered request used to block every future one: the request
+        # was written only when absent and removed only when a proposal was
+        # consumed, so one operator outage or one bad reply degraded this arm
+        # to blind mutation for the rest of the epoch - silently, since the
+        # fallback is a real mutation and nothing looked wrong.
+        self.request_ttl = request_ttl
+        self.expired = 0
         # The fallback must be the SAME operator the other arms run, or the
         # comparison measures mutation rate instead of who authored the
         # mutation. It was RandomMutator (point 0.008 / indel 0.02) against
@@ -66,7 +74,20 @@ class OdinMutator:
             except Exception:
                 self.failures += 1
                 proposal.rename(proposal.with_suffix(f".rejected-{int(time.time())}.json"))
-        if not request.exists():
+                # That request has had its answer, bad as it was. Retiring it
+                # here means the next birth files a fresh one instead of
+                # leaving the operator to guess whether to reply again.
+                request.unlink(missing_ok=True)
+        stale = False
+        if request.exists():
+            try:
+                age = time.time() - float(json.loads(request.read_text())["created_at"])
+                stale = age > self.request_ttl
+            except (OSError, ValueError, KeyError, TypeError):
+                stale = True          # an unreadable request wedges the queue too
+            if stale:
+                self.expired += 1
+        if stale or not request.exists():
             names = [ISA[op].name for op in genome if 0 <= op < len(ISA)]
             payload = {
                 "request_id": hashlib.sha256((str(time.time_ns()) + repr(names)).encode()).hexdigest()[:16],
@@ -78,7 +99,8 @@ class OdinMutator:
                     "signal/listen": "ephemeral local communication",
                     "build": "costly persistent improvement of a resource patch",
                     "peek/copyn": "read or copy adjacent organisms' code; enables parasitism",
-                    "climate": "the rich quadrant moves every 2,000 ticks",
+                    "climate": "quadrants differ in regeneration, harvest yield and "
+                               "per-instruction cost, and those differences do not move",
                 },
                 "directive": "Odin must author one motivated variant; preserve viable replication.",
             }

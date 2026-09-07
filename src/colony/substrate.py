@@ -28,7 +28,7 @@ def _read_int(path: Path) -> int | None:
         return None
 
 
-def cpu_temperature_c() -> float:
+def _k10temp_c() -> float:
     """Read the AMD package control temperature, failing closed if absent."""
     for hwmon in Path("/sys/class/hwmon").glob("hwmon*"):
         try:
@@ -45,6 +45,78 @@ def cpu_temperature_c() -> float:
             except (OSError, ValueError):
                 continue
     raise RuntimeError("AMD k10temp/Tctl sensor is unavailable")
+
+
+# Machine heat is the one physical signal with no cgroup equivalent, and on a
+# host that exposes no sensor - a VM, most cloud instances - reading it fails
+# closed and the colony cannot start at all. The source is therefore
+# selectable. The default is unchanged and still fails closed: a synthetic
+# reading is a thing you ask for, never a thing you get by accident, because
+# a colony silently running on a fabricated sensor would invalidate every
+# thermal number it reports.
+HOST_CPU_BAND = (45.0, 85.0)
+
+_host_cpu_prev: tuple[int, int] | None = None
+
+
+def _host_cpu_c() -> float:
+    """Whole-host CPU busy fraction mapped onto a temperature band.
+
+    This is not a temperature and does not pretend to be one; it is a load
+    signal wearing the same units so that the storm, cost and baseline
+    machinery upstream needs no special case. Busy fraction comes from the
+    first `cpu ` line of /proc/stat, which a cgroup cannot substitute for -
+    it cannot tell "I was not scheduled" from "I did not ask".
+
+    Calibration note: machine_fast_alpha is 0.001, so the fast EMA needs on
+    the order of 1000 ticks to follow a step. Driving a storm with this needs
+    a sustained load rise, not a burst.
+    """
+    global _host_cpu_prev
+    fields = [int(v) for v in open("/proc/stat").readline().split()[1:]]
+    idle, total = fields[3] + fields[4], sum(fields)
+    busy = 0.0
+    if _host_cpu_prev is not None:
+        d_idle, d_total = idle - _host_cpu_prev[0], total - _host_cpu_prev[1]
+        if d_total > 0:
+            busy = min(1.0, max(0.0, 1.0 - d_idle / d_total))
+    _host_cpu_prev = (idle, total)
+    low, high = HOST_CPU_BAND
+    return low + busy * (high - low)
+
+
+def _fixed_c(celsius: float):
+    def source() -> float:
+        return celsius
+    return source
+
+
+_heat_source = _k10temp_c
+heat_description = "AMD k10temp/Tctl"
+
+
+def set_heat_source(spec: str) -> str:
+    """Point machine heat at k10temp, host-cpu, or fixed:<celsius>."""
+    global _heat_source, heat_description
+    if spec == "k10temp":
+        _heat_source, heat_description = _k10temp_c, "AMD k10temp/Tctl"
+    elif spec == "host-cpu":
+        _heat_source = _host_cpu_c
+        heat_description = ("synthetic: whole-host CPU mapped to "
+                            f"{HOST_CPU_BAND[0]:.0f}-{HOST_CPU_BAND[1]:.0f}C")
+    elif spec.startswith("fixed:"):
+        value = float(spec.split(":", 1)[1])
+        _heat_source = _fixed_c(value)
+        heat_description = f"synthetic: fixed at {value:.1f}C"
+    else:
+        raise ValueError(f"unknown heat source {spec!r}; "
+                         "expected k10temp, host-cpu, or fixed:<celsius>")
+    return heat_description
+
+
+def cpu_temperature_c() -> float:
+    """Machine heat in degrees C, from whichever source is configured."""
+    return _heat_source()
 
 
 class SubstrateWorld(World):
