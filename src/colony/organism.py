@@ -38,6 +38,8 @@ class Organism:
     input_index: int = 0
     signals_sent: int = 0
     group: int = -1
+    lease_expires: int = 0     # tick this organism must have renewed by
+    renewals: int = 0          # heartbeats it has sent
     stolen: float = 0.0        # energy taken from others
     robbed: float = 0.0        # energy taken from me
     corruptions: int = 0       # genome words I overwrote in others
@@ -101,6 +103,8 @@ class Organism:
             "weather_cue_signals": getattr(self, "weather_cue_signals", 0),
             "experimental_ops": dict(getattr(self, "experimental_ops", {})),
             "salvaged": round(getattr(self, "salvaged", 0.0), 2),
+            "lease_expires": getattr(self, "lease_expires", 0),
+            "renewals": getattr(self, "renewals", 0),
             "stolen": round(getattr(self, "stolen", 0.0), 2),
             "robbed": round(getattr(self, "robbed", 0.0), 2),
             "corruptions": getattr(self, "corruptions", 0),
@@ -330,6 +334,20 @@ class Organism:
                 self.forecast_stored_mask |= 1 << slot
         elif op == Op.POST:
             colony.world.bus_post(self.b, self.a, writer=self.id)
+            if "lease" in colony.features:
+                # Renewal is a heartbeat, not a resource. Posting anything at
+                # all buys a little time; posting the quadrant you are actually
+                # standing in buys a full term. That gradient is deliberate -
+                # every hard thing in this world has been a peak with no slope,
+                # and nothing ever climbed one. Here the first step pays.
+                here = colony.world.biome(self.x, self.y)
+                exact = (self.a & 0xFF) == here
+                self.lease_expires = colony.world.tick + (
+                    colony.LEASE_FULL if exact else colony.LEASE_PARTIAL)
+                self.renewals = getattr(self, "renewals", 0) + 1
+                colony.lease_renewals = getattr(colony, "lease_renewals", 0) + 1
+                if exact:
+                    colony.lease_exact = getattr(colony, "lease_exact", 0) + 1
             if "bounty" in colony.features:
                 won = colony.world.claim_bounty(self.b, self.a, self.id)
                 if won:
