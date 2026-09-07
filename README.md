@@ -42,7 +42,10 @@ its tree is `thegrid-colony1`.
 ### Branches
 
 - `main` / `colony2-experimental` — the shared engine, the deployed units, tools.
-- `colony3-free-signal` — colony three, where `signal` and `listen` cost zero.
+- `colony3-free-signal` — colony three. The branch name understates it: as well
+  as `signal` and `listen` costing zero, this colony still runs the **older
+  economy** — salvage is scrap lying on tiles and decaying rather than a global
+  reclaim pool, and tile income is not coupled to host spare CPU.
 - `colony8-netlist` — colony eight, where a word packs `(op, src, dst)` across
   eight registers instead of operating on a shared register.
 - `archive/main-2026-09-04` — main as it stood before the September rewrite,
@@ -190,9 +193,13 @@ organism. The viewer renders one server-sent frame per completed tick with no
 interpolation, so real thermal pauses stay visible; clicking a tile follows an
 organism across ticks and reports its cause of death if it dies while selected.
 
-## Known issues
+## License
 
-`pytest` currently fails 11 of 33 tests. These are stale tests, not stale code:
-they encode a founder palette smaller than the current one, and the older
-scrap-on-tiles salvage economy, both of which changed deliberately. They are on
-the list to be rewritten.
+MIT. See `LICENSE`.
+
+## Tests
+
+`pytest` passes 33/33 on every colony except colony eight, whose packed
+`(op, src, dst)` encoding the shared test file does not yet speak - it builds
+genomes as bare opcodes, so 8 tests there fail on the encoding rather than on
+behaviour. Adapting them is outstanding work.
