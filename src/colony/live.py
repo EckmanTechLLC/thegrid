@@ -511,7 +511,9 @@ class Habitat:
             "ancestor": encode_genome(build_ancestor()),
             "tasks": colony.task_firsts,
             "name": self.name,
-            "climatePhase": getattr(world, "machine_band", (world.tick // 2000) % 4),
+            # Retained for the viewer's quadrant readout; it no longer gates
+            # any regeneration bonus.
+            "climatePhase": getattr(world, "machine_band", 0),
             "weather": {
                 "storms": getattr(world, "storm_count", 0),
                 "lastTick": getattr(world, "last_storm_tick", -1),
