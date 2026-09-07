@@ -296,14 +296,31 @@ class SubstrateWorld(World):
         # time, and thermal pressure are taken directly from Linux/hardware.
         c = self.config
         self.apply_resource_storm()
-        # The favoured biome tracks the machine, not a 2000-tick carousel.
-        phase = self.machine_band
         subsidy = self.grazing_subsidy
         for y, row in enumerate(self.energy):
             for x in range(c.width):
                 if row[x] < c.tile_capacity:
                     biome = self.biome(x, y)
-                    climate = 1.8 if biome == phase else 0.55
+                    # The rotating climate bonus is gone. It began as
+                    # phase = (tick // 2000) % 4, a clock that moved a 1.8x
+                    # multiplier through the quadrants so each held it a
+                    # quarter of the time. Keying it to machine_band was meant
+                    # to make it physical and instead froze it: band is
+                    # hot_bit + 2*memory_bit, both of which sit at 0 on this
+                    # box, so NW held the bonus permanently and every colony
+                    # piled into it - 53% to 81% of every population.
+                    #
+                    # Measured over 80s looking for an honest replacement:
+                    # Tctl spread 2.0C, loadavg 0.4, cpu 10.9%, gpu busy 39
+                    # but pegged at a 98% median. Nothing on this machine
+                    # spends meaningful time in four distinct states, and
+                    # quantising a saturated signal into quartiles would
+                    # manufacture the rotation rather than measure it - a
+                    # clock in a sensor's clothes, which is the mistake this
+                    # is fixing. The biome base rates still differentiate the
+                    # quadrants; that differentiation is stated design rather
+                    # than an artifact.
+                    climate = 1.0
                     base = (1.25, 0.65, 0.40, 0.75)[biome]
                     construction = self.structures[y][x] * 0.003 * (4.0 if biome == 2 else 0.6)
                     row[x] = min(c.tile_capacity,
