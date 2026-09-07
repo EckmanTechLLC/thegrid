@@ -242,7 +242,8 @@ class Habitat:
             colony.tasks = TemporalTaskEnvironment()
             colony.features = set(self.features)
             for _c in ("burns", "bounties_offered", "macros_defined", "macro_runs",
-                       "steals", "corruptions"):
+                       "steals", "corruptions", "lease_renewals", "lease_exact",
+                       "lease_expired"):
                 if not hasattr(colony, _c):
                     setattr(colony, _c, 0)
             if not hasattr(colony.world, "bounties"):
@@ -265,7 +266,8 @@ class Habitat:
                 if not hasattr(organism, "group"):
                     organism.group = -1
                 for _f, _v in (("stolen", 0.0), ("robbed", 0.0),
-                               ("corruptions", 0), ("corrupted", 0)):
+                               ("corruptions", 0), ("corrupted", 0),
+                               ("lease_expires", 0), ("renewals", 0)):
                     if not hasattr(organism, _f):
                         setattr(organism, _f, _v)
                 if not hasattr(organism, "call_slot"):
@@ -486,7 +488,16 @@ class Habitat:
             "biomeGenomes": [biome_genomes[i] for i in range(4)],
             "organisms": encode_positions(colony, world.config.width),
             "genomeGlyphs": "".join(genome_id(o.genome)[0] for o in colony.organisms),
-            "strains": [strains.get(i, 0) for i in range(self.founders)],
+            # Sized to the lineages that actually exist, not to the founder
+            # palette. A recolonised epoch is seeded from up to 64 migrant
+            # genomes, so lineage indices reach 63 while self.founders stays 23
+            # - and every lineage at 23 or above silently vanished from this
+            # array. Colony seven showed 2 lineages totalling 119 organisms
+            # while strains reported one slot holding 49. Index semantics are
+            # unchanged: slot N is always lineage N.
+            "strains": [strains.get(i, 0)
+                        for i in range(max(self.founders,
+                                           (max(strains) + 1) if strains else 0))],
             "dominant": encode_genome(genome), "carriers": carriers,
             "isa": [item.name for item in ISA],
             "ancestor": encode_genome(build_ancestor()),
@@ -528,6 +539,16 @@ class Habitat:
                 "macroRuns": getattr(colony, "macro_runs", 0),
                 "macroSlots": [len(m) for m in getattr(world, "macros", [])],
                 "macroUses": list(getattr(world, "macro_uses", [])),
+            },
+            "lease": {
+                "active": "lease" in colony.features,
+                "renewals": getattr(colony, "lease_renewals", 0),
+                "exact": getattr(colony, "lease_exact", 0),
+                "expired": getattr(colony, "lease_expired", 0),
+                "medianRemaining": (sorted(
+                    max(0, getattr(o, "lease_expires", 0) - world.tick)
+                    for o in colony.organisms)[len(colony.organisms) // 2]
+                    if colony.organisms else 0),
             },
             "predation": {
                 "steals": getattr(colony, "steals", 0),
