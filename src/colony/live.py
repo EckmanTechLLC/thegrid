@@ -8,6 +8,8 @@ import ctypes
 import gc
 import json
 import os
+import sys
+import traceback
 import pickle
 import shutil
 import urllib.request
@@ -882,6 +884,13 @@ async def create_app(habitat: Habitat, ticks_per_second: int) -> web.Application
         app["runner"] = asyncio.create_task(run_habitat(habitat, ticks_per_second))
         def restart_on_failure(task: asyncio.Task) -> None:
             if habitat.running and not task.cancelled() and task.exception() is not None:
+                # Say what died. This retrieved the exception and exited on it
+                # without ever printing it, so a crash-looping colony left
+                # nothing in the journal but "status=70/SOFTWARE" - no
+                # traceback, no line number, nothing to act on. os._exit skips
+                # interpreter cleanup, so flush by hand or the write is lost.
+                traceback.print_exception(task.exception(), file=sys.stderr)
+                sys.stderr.flush()
                 os._exit(70)
         app["runner"].add_done_callback(restart_on_failure)
 
