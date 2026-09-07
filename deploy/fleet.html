@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The Grid — Fleet</title>
+<style>
+:root{color-scheme:dark;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;background:#090713;color:#e8e3f7}
+*{box-sizing:border-box}
+body{margin:0 auto;padding:14px;max-width:2400px}
+header{display:flex;justify-content:space-between;align-items:center;gap:16px;border-bottom:1px solid #332b4d;padding-bottom:8px;margin-bottom:12px;flex-wrap:wrap}
+h1{font-size:15px;margin:0;letter-spacing:.1em}
+.ctl{display:flex;align-items:center;gap:8px;font-size:10px;color:#6f668f}
+.ctl input[type=range]{width:150px;accent-color:#68dfff}
+#rate{color:#68dfff;min-width:52px;text-align:right}
+#meta{font-size:10px;color:#6f668f}
+#fps{color:#4a4363}
+#fleet{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr))}
+@media(min-width:1500px){#fleet{grid-template-columns:repeat(auto-fit,minmax(min(100%,600px),1fr))}}
+.col{background:#121020;border:1px solid #2d2742;padding:9px;display:flex;flex-direction:column;gap:7px}
+.col.down{border-color:#5c2333;opacity:.65}
+.top{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
+.nm{font-size:13px;letter-spacing:.06em}
+.ep{font-size:10px;color:#6f668f}
+.feat{font-size:9px;color:#68dfff;letter-spacing:.04em;min-height:11px}
+.feat .none{color:#4a4363}
+.body{display:flex;gap:9px}
+canvas{image-rendering:pixelated;border:1px solid #241f36;flex:0 0 auto;width:clamp(180px,38%,300px);height:auto;align-self:flex-start}
+.stats{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:11px;align-content:start;flex:1;min-width:0}
+@media(min-width:1500px){.stats{grid-template-columns:auto 1fr auto 1fr;gap:2px 10px}}
+.k{color:#6f668f;white-space:nowrap}
+.v{text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.warn{color:#ff8fa3}
+.bar{height:3px;background:#241f36;margin-top:2px}
+.bar i{display:block;height:100%;background:#68dfff;transition:width .3s}
+.gen{font-size:10px;color:#8d84ad;word-break:break-all;line-height:1.25;max-height:26px;overflow:hidden}
+</style></head><body>
+<header>
+  <h1>THE GRID // FLEET</h1>
+  <div class="ctl"><label for="hz">refresh</label>
+    <input id="hz" type="range" min="0" max="7" step="1" value="5">
+    <span id="rate">3s</span></div>
+  <span id="meta">connecting…</span>
+</header>
+<div id="fleet"></div>
+<script>
+// Palette and compositing lifted verbatim from live_viewer.html so a colony
+// looks identical here and on its own page. Energy is encoded as a digit 0-9
+// (record.encode_energy), which is why the ramp has ten entries.
+const S=6, A='0123456789abcdefghijklmnopqrstuv';
+const ramp=['#171331','#241a4d','#3a1f63','#56206e','#75216f','#94266a','#b4305c','#d24a45','#ea7128','#ffb03a'];
+const strains=['#7fe9ff','#7cffc4','#c9a6ff','#fff','#ff9bd2','#c3ff6b','#ffb03a','#68dfff','#ff7a68','#a98bff','#63e6be','#ffd6a5','#f4a261'];
+const biomeColors=['#8fcf72','#d7a84b','#6fb3a8','#9b7bd3'];
+function mix(a,b,t){const q=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16));const u=q(a),v=q(b);
+return '#'+u.map((n,i)=>Math.round(n+(v[i]-n)*t).toString(16).padStart(2,'0')).join('')}
+const STEPS=[100,200,250,500,1000,3000,5000,10000];
+const LABEL=['100ms','200ms','250ms','500ms','1s','3s','5s','10s'];
+const ROWS=[['pop','population'],['generation','generation'],['complexity','complexity'],
+  ['tasks solved','tasks'],['groups','groups'],['steals','steals'],['corrupted','corrupted'],
+  ['predators','predators'],['bus w/r','bus'],['macro runs','macros'],['bounties','bounties'],
+  ['burns','burns'],['cost','cost'],['subsidy','subsidy'],['memory','memory']];
+function n(v){return (v===undefined||v===null)?0:v}
+function f(v){return n(v).toLocaleString()}
+const panels=new Map();
+
+function draw(cv,d){
+  if(!d.energy)return;
+  if(cv.width!==d.width*S){cv.width=d.width*S;cv.height=d.height*S}
+  const x=cv.getContext('2d');
+  for(let i=0;i<d.energy.length;i++){
+    let color=ramp[+d.energy[i]]||ramp[0],
+        biome=+(d.biomeField||'0')[i],
+        built=A.indexOf((d.structureField||'')[i]),
+        signal=parseInt((d.signalField||'0')[i],13)||0,
+        scrap=A.indexOf((d.scrapField||'')[i]);
+    const px=(i%d.width)*S,py=Math.floor(i/d.width)*S;
+    color=mix(color,biomeColors[biome]||biomeColors[0],.10);
+    if(built>0)color=mix(color,'#24d18f',Math.min(.65,.16+built/40));
+    if(signal>0)color=mix(color,'#68dfff',Math.min(.75,.2+signal/20));
+    x.fillStyle=color;x.fillRect(px,py,S,S);
+    if(scrap>0){const size=Math.min(5,2+Math.floor(scrap/8));
+      x.fillStyle='#ffb347';x.beginPath();x.arc(px+S-3,py+3,size/2,0,Math.PI*2);x.fill()}
+  }
+  const o=d.organisms||'';
+  for(let i=0;i+3<o.length;i+=4){
+    const idx=A.indexOf(o[i])*1024+A.indexOf(o[i+1])*32+A.indexOf(o[i+2]);
+    if(idx<0||idx>=d.width*d.height)continue;
+    x.fillStyle=strains[A.indexOf(o[i+3])%strains.length];
+    x.fillRect((idx%d.width)*S,Math.floor(idx/d.width)*S,S,S);
+  }
+}
+
+// Built once per colony; every later poll writes into these nodes instead of
+// rebuilding the DOM, which is what makes a 100ms refresh viable at all.
+function build(c){
+  const el=document.createElement('div');
+  el.className='col';
+  el.innerHTML=`<div class="top"><span class="nm">COLONY ${c.label.toUpperCase()}</span>
+      <span class="ep"></span></div>
+    <div class="feat"></div>
+    <div class="body"><canvas></canvas><div class="stats">
+      ${ROWS.map(([k,id])=>`<span class="k">${k}</span><span class="v" data-v="${id}"></span>`).join('')}
+    </div></div>
+    <div class="bar"><i style="width:0"></i></div>
+    <div class="gen"></div>`;
+  const v={};
+  el.querySelectorAll('[data-v]').forEach(e=>v[e.dataset.v]=e);
+  const rec={el,v,ep:el.querySelector('.ep'),feat:el.querySelector('.feat'),
+             cv:el.querySelector('canvas'),bar:el.querySelector('.bar i'),
+             gen:el.querySelector('.gen')};
+  panels.set(c.label,rec);
+  document.getElementById('fleet').appendChild(el);
+  return rec;
+}
+function set(node,text,warn){
+  if(node.textContent!==text)node.textContent=text;
+  node.classList.toggle('warn',!!warn);
+}
+function update(c){
+  const p=panels.get(c.label)||build(c);
+  p.el.classList.toggle('down',!c.up);
+  if(!c.up){set(p.ep,`:${c.port} ${c.error||'down'}`,true);return}
+  const P=c.predation||{},G=c.groups||{},F=c.frontier||{},M=c.machine||{},W=c.weather||{},X=c.complexity||{};
+  const sub=(M.subsidy!==undefined?M.subsidy:W.subsidy);
+  set(p.ep,`epoch ${f(c.epoch)} · t${f(c.tick)}`);
+  const feats=(c.features&&c.features.length)?c.features.join(' · '):null;
+  if(p.feat.dataset.f!==String(feats)){p.feat.dataset.f=String(feats);
+    p.feat.innerHTML=feats||'<span class="none">no features</span>'}
+  set(p.v.population,f(c.population));
+  set(p.v.generation,f(c.generation));
+  set(p.v.complexity,`${n(X.median)} / ${n(X.max)}`);
+  set(p.v.tasks,String(Object.keys(c.tasks||{}).length));
+  set(p.v.groups,`${n(G.bound)} in ${n(G.count)}`);
+  set(p.v.steals,f(P.steals),n(P.steals)>0);
+  set(p.v.corrupted,f(P.corruptions),n(P.corruptions)>0);
+  set(p.v.predators,f(P.carriers),n(P.carriers)>0);
+  set(p.v.bus,`${f(c.bus&&c.bus.writes)}/${f(c.bus&&c.bus.reads)}`);
+  set(p.v.macros,f(F.macroRuns));
+  set(p.v.bounties,f(F.bountyClaims));
+  set(p.v.burns,f(F.burns));
+  set(p.v.cost,n(c.cost)+'x',n(c.cost)>1.6);
+  set(p.v.subsidy,sub===undefined?'n/a':Math.round(sub*100)+'%');
+  set(p.v.memory,`${Math.round(n(c.memoryBytes)/1e6)}/${Math.round(n(c.memoryMaxBytes)/1e6)}M`);
+  p.bar.style.width=(sub===undefined?0:Math.round(sub*100))+'%';
+  set(p.gen,(c.dominant||'').slice(0,120));
+  draw(p.cv,c);
+}
+
+let timer=null,inflight=false,frames=[],period=3000;
+async function tick(){
+  if(inflight)return;                       // never stack requests
+  inflight=true;
+  try{
+    const r=await fetch('/api/fleet',{cache:'no-store'});
+    const d=await r.json();
+    let pop=0,up=0;
+    d.colonies.forEach(c=>{update(c);if(c.up){up++;pop+=n(c.population)}});
+    const now=performance.now();
+    frames.push(now);frames=frames.filter(t=>t>now-5000);
+    document.getElementById('meta').innerHTML=
+      `${up}/${d.colonies.length} colonies · ${pop.toLocaleString()} organisms · `+
+      `<span id="fps">${(frames.length/5).toFixed(1)} updates/s</span>`;
+  }catch(e){
+    document.getElementById('meta').textContent='fleet endpoint unreachable';
+  }finally{inflight=false}
+}
+function schedule(ms){
+  period=ms;
+  if(timer)clearInterval(timer);
+  timer=setInterval(tick,ms);
+  document.getElementById('rate').textContent=LABEL[STEPS.indexOf(ms)];
+  try{localStorage.setItem('fleetRate',String(ms))}catch(e){}
+}
+const slider=document.getElementById('hz');
+slider.oninput=()=>schedule(STEPS[+slider.value]);
+let saved=3000;
+try{const v=parseInt(localStorage.getItem('fleetRate'));if(STEPS.includes(v))saved=v}catch(e){}
+slider.value=String(STEPS.indexOf(saved));
+schedule(saved);
+tick();
+</script></body></html>
