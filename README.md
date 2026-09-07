@@ -42,7 +42,10 @@ its tree is `thegrid-colony1`.
 ### Branches
 
 - `main` / `colony2-experimental` — the shared engine, the deployed units, tools.
-- `colony3-free-signal` — colony three, where `signal` and `listen` cost zero.
+- `colony3-free-signal` — colony three. The branch name understates it: as well
+  as `signal` and `listen` costing zero, this colony still runs the **older
+  economy** — salvage is scrap lying on tiles and decaying rather than a global
+  reclaim pool, and tile income is not coupled to host spare CPU.
 - `colony8-netlist` — colony eight, where a word packs `(op, src, dst)` across
   eight registers instead of operating on a shared register.
 - `archive/main-2026-09-04` — main as it stood before the September rewrite,
