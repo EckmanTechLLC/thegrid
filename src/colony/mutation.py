@@ -230,7 +230,12 @@ PHYSICS
   compute with `nand`, submit with `output`. Harder tasks pay more.
 - `signal`/`listen` permit local communication. `build` spends energy to improve
   a patch. `peek`/`copyn` can read or copy adjacent genomes, permitting
-  cooperation, parasitism, and defensive arms races. Rich climate regions move.
+  cooperation, parasitism, and defensive arms races.
+- The four map quadrants differ permanently in regeneration rate, harvest yield
+  and per-instruction cost. They do not rotate: a quadrant that is good for
+  harvesting stays good for harvesting, and one that is cheap for arithmetic and
+  communication stays cheap for those. Where an organism stands is a standing
+  trade-off, not a moving target.
 
 PARENT GENOME
 {disassemble(genome, annotate=False)}
