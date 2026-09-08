@@ -70,6 +70,7 @@ const ROWS=[
  ['lease','lease','Lease heartbeats sent and how many carried the correct quadrant. Where the lease feature is on, ageing is switched off and an organism must post to renew or be reclaimed: posting anything buys 600 ticks, posting the quadrant it is actually standing in buys 2400. Blank where the feature is off.'],
  ['reclaimed','reclaimed','Organisms reclaimed for failing to renew their lease - death by obligation rather than by hunger. This is what makes doing nothing fatal; a nop-only genome cannot starve, because nop costs nothing.'],
  ['quadrants','quadrants','Where the population is standing, as NW/NE/SW/SE percentages. The quadrants are not equal: NW regenerates at 1.25 against 0.65, 0.40 and 0.75, pays 1.35x on harvest yield and charges 0.65x for the harvest instruction, so a crowd there is the map being obeyed rather than a preference. NE discounts scan and move, SW discounts build and salvage, SE discounts every comms and arithmetic instruction and pays 1.75x on task rewards.'],
+ ['operator','operator','Model-authored births: proposals accepted out of proposals requested, then failures and expired requests. Only meaningful where the mutator is odin. A rising expired count means requests are timing out unanswered, so the arm is quietly falling back to blind mutation - which looks identical to working from the outside.'],
  ['cost','cost','Thermal cost multiplier. Every instruction costs this many times its base price, derived from Odin\'s actual Tctl reading against a slow trailing baseline. 1.0x means the box is cool.'],
  ['subsidy','subsidy','How much of the grazing subsidy remains. Tile yield decays linearly to zero over 500,000 ticks and does not come back; at 0% harvesting pays nothing and only tasks, royalties and salvage remain. Resets when the colony reseeds.'],
  ['memory','memory','Real resident memory of this colony\'s process against its cgroup ceiling. Genome reservations commit actual pages, so this is RSS rather than a counter.'],
@@ -164,6 +165,9 @@ function update(c){
     set(p.v.quadrants,bt?B.map(x=>Math.round(100*x/bt)).join('/'):'—',
         bt>0&&Math.max(...B)/bt>0.5);
   }else set(p.v.quadrants,'—');
+  const OP=c.mutator||{};   // not M - that is c.machine, three lines up
+  set(p.v.operator, OP.kind==='odin' ? `${f(OP.accepted)}/${f(OP.calls)} · ${f(OP.failures)}f ${f(OP.expired)}x` : '—',
+      n(OP.expired)>0||n(OP.failures)>0);
   set(p.v.cost,n(c.cost)+'x',n(c.cost)>1.6);
   set(p.v.subsidy,sub===undefined?'n/a':Math.round(sub*100)+'%');
   set(p.v.memory,`${Math.round(n(c.memoryBytes)/1e6)}/${Math.round(n(c.memoryMaxBytes)/1e6)}M`);

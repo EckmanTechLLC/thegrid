@@ -44,7 +44,14 @@ COOLDOWN = float(os.environ.get("GRID_COOLDOWN", "20"))
 # all of it reasoning, and returns EMPTY content if it is cut off first.
 # At 1,400 every answer came back finish_reason=length and unusable.
 # Qwen's /no_think directive does not suppress it on this build - tested.
-MAX_TOKENS = int(os.environ.get("GRID_MAX_TOKENS", "4000"))
+MAX_TOKENS = int(os.environ.get("GRID_MAX_TOKENS", "10000"))
+# Qwen3.6 is a hybrid-reasoning model and its chat template leaves thinking
+# ON unless enable_thinking is explicitly false. At a 4000-token cap it
+# spent the entire budget in <think> and returned empty content on ~93% of
+# calls for three days. A real call finishes in ~6400 tokens and ~240s, so
+# the budget has to cover reasoning AND the answer, and the request timeout
+# has to cover the whole thing.
+REQUEST_TIMEOUT = float(os.environ.get("GRID_REQUEST_TIMEOUT", "600"))
 TEMPERATURE = float(os.environ.get("GRID_TEMPERATURE", "1.0"))
 MAX_GENOME = 64
 
@@ -70,7 +77,7 @@ def ask(request: dict) -> list[str] | None:
     }).encode()
     req = urllib.request.Request(ENDPOINT, data=body,
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=300) as response:
+    with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as response:
         payload = json.load(response)
     choice = payload["choices"][0]
     text = (choice["message"].get("content") or "").strip()

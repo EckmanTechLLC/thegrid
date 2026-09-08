@@ -31,7 +31,7 @@ KEEP = ("name", "epoch", "tick", "population", "generation", "cost", "features",
         "structureField", "signalField", "scrapField",
         "tasks", "deathsByCause", "reclaimPool", "slotsHeld", "publishRefused",
         "signalsHeard", "memoryBytes", "memoryMaxBytes", "dominant", "carriers",
-        "biomePopulations")
+        "biomePopulations", "mutator")
 
 
 def fetch(entry: tuple[str, int]) -> dict:
