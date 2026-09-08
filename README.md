@@ -175,6 +175,20 @@ Unit files for the deployed arrangement are in `deploy/systemd/`; see
 
 ## Tools
 
+All three run out of a checkout of this repository at
+`~/odin/thegrid-tools`, the same way every colony runs out of its own checkout.
+There is one copy of each tool, it is the copy under version control, and
+editing one is an ordinary commit. They previously lived in standalone
+directories with snapshots pasted in here, and the snapshots drifted within a
+day - a dashboard fix, a token-budget change and a JavaScript syntax fix were
+all present in the running copy and absent from the published one.
+
+The tools share a history with the engine deliberately. The guide imports each
+colony's own modules, the fleet page uses the viewer's exact palette, and the
+operator reuses the colonies' own `build_prompt` and `parse_genome`. They are
+instruments for this codebase rather than independent projects, so versioning
+them apart from it would be pretending to a separation that does not exist.
+
 - `tools/fleet` — all eight colonies on one page. The colony viewers send no
   CORS headers, so a browser cannot poll eight origins; this fans out
   server-side and serves one combined document.

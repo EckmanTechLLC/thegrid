@@ -4,8 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/etl/odin/thegrid-operator
-ExecStart=/usr/bin/python3 /home/etl/odin/thegrid-operator/grid_operator.py
+WorkingDirectory=/home/etl/odin/thegrid-tools/tools/operator
+ExecStart=/usr/bin/python3 /home/etl/odin/thegrid-tools/tools/operator/grid_operator.py
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1

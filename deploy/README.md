@@ -31,3 +31,13 @@ is resolved per colony:
 Note that colony one's unit is `thegrid-colony.service`, with no digit, while
 its tree is `thegrid-colony1`. That mismatch is easy to trip over when
 restarting the fleet in a loop.
+
+## The tools
+
+`thegrid-fleet` and `thegrid-operator` run from `~/odin/thegrid-tools`, a
+checkout of this repository, with `WorkingDirectory` pointed at
+`tools/fleet` and `tools/operator` inside it. `tools/guide` is run by hand from
+the same checkout and writes `GUIDE.md` next to itself.
+
+Keep it that way. The alternative - a live directory plus a copy committed here
+- was tried, and the copy was stale inside a day.

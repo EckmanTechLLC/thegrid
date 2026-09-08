@@ -4,8 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/etl/odin/thegrid-fleet
-ExecStart=/usr/bin/python3 /home/etl/odin/thegrid-fleet/fleet.py
+WorkingDirectory=/home/etl/odin/thegrid-tools/tools/fleet
+ExecStart=/usr/bin/python3 /home/etl/odin/thegrid-tools/tools/fleet/fleet.py
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
