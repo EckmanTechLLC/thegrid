@@ -275,7 +275,11 @@ def build() -> str:
 
 
 if __name__ == "__main__":
-    target = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("/home/etl/odin/thegrid-guide/GUIDE.md")
+    # Next to the script, wherever that is. This was pinned to
+    # ~/odin/thegrid-guide, which stopped existing when the tools moved into
+    # a checkout of the repo they document.
+    target = (Path(sys.argv[1]) if len(sys.argv) > 1
+              else Path(__file__).resolve().parent / "GUIDE.md")
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(build())
     print(f"wrote {target}")
