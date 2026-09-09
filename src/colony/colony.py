@@ -62,6 +62,7 @@ class Colony:
         self.links = 0          # successful bindings
         self.group_births = 0   # members copied by a groupmate's replication
         self.lifecycle_events = deque()
+        self.bit_flips = 0
         genomes = founder_genomes or [build_ancestor() for _ in range(founders)]
         if len(genomes) < founders:
             raise ValueError("founder_genomes must contain at least one genome per founder")
@@ -103,6 +104,56 @@ class Colony:
         self.next_id += 1
         return value
 
+    # -- bit rot ------------------------------------------------------------
+    # A genome word is a word in RAM, and RAM on a hot machine is not
+    # reliable. Above this box's own trailing thermal baseline, a bit in a
+    # living genome occasionally flips. Nothing dies of this directly: the
+    # instruction becomes a different instruction, or an out-of-range word
+    # that executes as a nop. The damage is silent and permanent, and it is
+    # inherited, because the flip happens in the genome and not in the
+    # execution of it.
+    #
+    # This is a hardware fault model, not a mutagen. Mutation happens at
+    # reproduction and is the operator's business; this happens to whoever is
+    # standing there when the temperature rises, mid-life, with no copy event
+    # involved. The only defence reachable from this instruction set is
+    # redundancy - carrying a spare copy of the machinery that matters.
+    #
+    # Rate is per organism per tick per degree over baseline. Typical excess
+    # on this box is ~0.13 C, giving ~1.3e-4: roughly a one-in-four chance
+    # that an organism living a full 2400 ticks takes a single flip. A real
+    # thermal excursion of a couple of degrees makes it near-certain.
+    BITROT_PER_DEGREE = 0.001
+    BITROT_CEILING = 0.01      # even a very hot box cannot shred a genome
+    BITROT_BITS = 6            # opcodes occupy 0-49; 6 bits keeps flips in range
+    # Class-level, because a running colony is restored from a pickle and an
+    # existing checkpoint has neither of these in its instance dict.
+    bit_flips = 0
+    _rot_rng = None
+
+    def _rot_genomes(self) -> None:
+        """Flip a bit in a living genome when the machine runs hot."""
+        world = self.world
+        excess = max(0.0, getattr(world, "machine_heat_fast", 0.0)
+                     - getattr(world, "machine_baseline", 0.0))
+        rate = min(self.BITROT_CEILING, self.BITROT_PER_DEGREE * excess)
+        if rate <= 0.0:
+            return
+        rng = self._rot_rng
+        if rng is None:
+            # Its own stream. Consuming self.rng here would shift every
+            # downstream evolutionary draw as a side effect of room
+            # temperature. Built on first use so a restored checkpoint gets
+            # one too.
+            rng = self._rot_rng = random.Random(getattr(self, "seed", 0) ^ 0xB1701)
+        for organism in self.organisms:
+            if not organism.genome or rng.random() >= rate:
+                continue
+            index = rng.randrange(len(organism.genome))
+            organism.genome[index] ^= 1 << rng.randrange(self.BITROT_BITS)
+            organism.bit_flips = getattr(organism, "bit_flips", 0) + 1
+            self.bit_flips += 1
+
     def step(self) -> None:
         # Unworked tasks drift back up in price each tick (scarcity pricing).
         self.tasks.decay_rates()
@@ -113,6 +164,8 @@ class Colony:
         offset = self.world.tick % len(current) if current else 0
         for organism in current[offset:] + current[:offset]:
             organism.execute(self)
+        if "bitrot" in self.features:
+            self._rot_genomes()
         survivors = []
         for organism in self.organisms:
             if organism.energy <= 0:

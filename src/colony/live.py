@@ -647,6 +647,8 @@ class Habitat:
                                   for row in world.scrap for value in row),
             "scrapTiles": sum(value > 0 for row in world.scrap for value in row),
             "scrapAvailable": round(getattr(world, "reclaim_pool", 0.0), 2),
+            # Silent, permanent, inherited damage from the machine running hot.
+            "bitFlips": getattr(colony, "bit_flips", 0),
             "reclaimPool": round(getattr(world, "reclaim_pool", 0.0), 2),
             "publishRefused": getattr(colony, "publish_refused", 0),
             "slotHeat": [round(v, 2) for v in getattr(world, "slot_heat", [])],
