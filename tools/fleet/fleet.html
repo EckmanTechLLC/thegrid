@@ -22,6 +22,10 @@ h1{font-size:15px;margin:0;letter-spacing:.1em}
 .feat{font-size:9px;color:#68dfff;letter-spacing:.04em;min-height:11px}
 .feat .none{color:#4a4363}
 .body{display:flex;gap:9px}
+.why{margin:4px 0 0;padding:0;list-style:none;font-size:11px;line-height:1.45;color:#ffd479}
+.why li:before{content:"\2192 ";opacity:.7}
+.flagged{outline:1px solid #ffd479;outline-offset:-1px}
+#headline{margin:0 0 10px;font-size:13px;color:#ffd479;min-height:18px}
 canvas{image-rendering:pixelated;border:1px solid #241f36;flex:0 0 auto;width:clamp(180px,38%,300px);height:auto;align-self:flex-start}
 .stats{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;font-size:11px;align-content:start;flex:1;min-width:0}
 @media(min-width:1500px){.stats{grid-template-columns:auto 1fr auto 1fr;gap:2px 10px}}
@@ -39,6 +43,7 @@ canvas{image-rendering:pixelated;border:1px solid #241f36;flex:0 0 auto;width:cl
     <span id="rate">3s</span></div>
   <span id="meta">connecting…</span>
 </header>
+<p id="headline"></p>
 <div id="fleet"></div>
 <script>
 // Palette and compositing lifted verbatim from live_viewer.html so a colony
@@ -114,7 +119,7 @@ function build(c){
   el.innerHTML=`<div class="top"><span class="nm">COLONY ${c.label.toUpperCase()}</span>
       <span class="ep" title="Current epoch number and tick. An epoch ends when every organism dies (or you press RESEED) and a fresh one is seeded - from ancestral founders, or from a living peer if this colony has --peers."></span></div>
     <div class="feat" title="Which optional instruction groups this colony implements. A disabled opcode executes as a nop rather than being absent, so genomes stay comparable across colonies."></div>
-    <div class="body"><canvas></canvas><div class="stats">
+    <div class="body"><div class="stats">
       ${ROWS.map(([k,id,tip])=>`<span class="k" title="${tip.replace(/"/g,'&quot;')}">${k}</span><span class="v" data-v="${id}" title="${tip.replace(/"/g,'&quot;')}"></span>`).join('')}
     </div></div>
     <div class="bar" title="Grazing subsidy remaining - the bar empties as tile yield is withdrawn toward zero."><i style="width:0"></i></div>
@@ -122,8 +127,15 @@ function build(c){
   const v={};
   el.querySelectorAll('[data-v]').forEach(e=>v[e.dataset.v]=e);
   const rec={el,v,ep:el.querySelector('.ep'),feat:el.querySelector('.feat'),
-             cv:el.querySelector('canvas'),bar:el.querySelector('.bar i'),
+             bar:el.querySelector('.bar i'),
              gen:el.querySelector('.gen')};
+  // The grid lives on each colony's own viewer. Opening it there costs the
+  // fleet page nothing and gives the full canvas, inspector and stream.
+  el.style.cursor='pointer';
+  el.title='open '+c.label+' on port '+c.port;
+  el.addEventListener('click',()=>window.open('http://'+location.hostname+':'+c.port+'/','_blank'));
+  rec.why=document.createElement('ul');rec.why.className='why';
+  el.appendChild(rec.why);
   panels.set(c.label,rec);
   document.getElementById('fleet').appendChild(el);
   return rec;
@@ -172,8 +184,18 @@ function update(c){
   set(p.v.subsidy,sub===undefined?'n/a':Math.round(sub*100)+'%');
   set(p.v.memory,`${Math.round(n(c.memoryBytes)/1e6)}/${Math.round(n(c.memoryMaxBytes)/1e6)}M`);
   p.bar.style.width=(sub===undefined?0:Math.round(sub*100))+'%';
+  const why=c.notable||[];
+  if(p.why){
+    const text=why.join('|');
+    if(p.why.dataset.text!==text){          // only touch the DOM when it changes
+      p.why.dataset.text=text;
+      p.why.innerHTML='';
+      for(const w of why){const li=document.createElement('li');li.textContent=w;p.why.appendChild(li);}
+    }
+  }
+  p.el.classList.toggle('flagged',why.length>0);
   set(p.gen,(c.dominant||'').slice(0,120));
-  draw(p.cv,c);
+
 }
 
 let timer=null,inflight=false,frames=[],period=3000;
@@ -184,7 +206,16 @@ async function tick(){
     const r=await fetch('/api/fleet',{cache:'no-store'});
     const d=await r.json();
     let pop=0,up=0;
-    d.colonies.forEach(c=>{update(c);if(c.up){up++;pop+=n(c.population)}});
+    // Flagged colonies first, so what is worth opening is at the top.
+    const list=d.colonies.slice().sort((a,b)=>
+      ((b.notable||[]).length>0)-((a.notable||[]).length>0));
+    list.forEach(c=>{update(c);if(c.up){up++;pop+=n(c.population)}});
+    const host=document.getElementById('fleet');
+    list.forEach(c=>{const p=panels.get(c.label);if(p&&p.el)host.appendChild(p.el)});
+    const flagged=list.filter(c=>(c.notable||[]).length>0);
+    document.getElementById('headline').textContent = flagged.length
+      ? flagged.length+' worth a look: '+flagged.map(c=>c.label).join(', ')
+      : 'nothing unusual across '+list.length+' colonies';
     const now=performance.now();
     frames.push(now);frames=frames.filter(t=>t>now-5000);
     document.getElementById('meta').innerHTML=
