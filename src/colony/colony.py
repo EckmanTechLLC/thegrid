@@ -147,47 +147,62 @@ class Colony:
     REPRODUCTION_WINDOW = 500
 
     def _evict_unused(self) -> None:
-        """Reclaim the least recently useful organisms when memory is full."""
+        """Reclaim the least recently useful. Two triggers, different rules."""
         world = self.world
         cap = getattr(world.config, "memory_cap", 0)
         if cap <= 0 or not self.organisms:
             return
-        limit = self.EVICTION_HIGH_WATER * cap
         tick = world.tick
-        candidates = [o for o in self.organisms if o.age >= self.EVICTION_GRACE]
+        limit = self.EVICTION_HIGH_WATER * cap
 
         def idle_for(o):
             last = o.last_useful_tick
             return o.age if last is None else tick - last
 
-        # Collect anything unreferenced for a full lifespan, whatever the
-        # memory situation, then keep going on pressure alone if still tight.
-        stale = [o for o in candidates if idle_for(o) >= self.EVICTION_TTL]
-        if not stale and world.memory_used <= limit:
+        def rank(o):
+            # Never-useful first, oldest of those first - they have had the
+            # most opportunity and taken none of it. Then by how long ago.
+            last = o.last_useful_tick
+            return (0, -o.age) if last is None else (1, last)
+
+        # Sweep 1: garbage collection. Anything unreferenced for a full
+        # lifespan goes, whatever the memory situation. Newborns are exempt so
+        # they get a chance to act before being judged.
+        doomed = {id(o) for o in self.organisms
+                  if o.age >= self.EVICTION_GRACE and idle_for(o) >= self.EVICTION_TTL}
+
+        # Sweep 2: real pressure, and it does NOT respect the grace window.
+        # When the pages are gone they are gone. Exempting newborns here let
+        # the population run away exponentially - at tick 903 almost every
+        # organism was younger than the grace window, so almost nothing was
+        # eligible and eviction could not keep up with birth.
+        if world.memory_used > limit:
+            used = world.memory_used
+            for organism in sorted(self.organisms, key=rank):
+                if used <= limit or len(self.organisms) - len(doomed) <= 1:
+                    break
+                if id(organism) not in doomed:
+                    doomed.add(id(organism))
+                    used -= len(organism.genome)
+
+        if not doomed:
             return
-        # (0, 0) for never-useful sorts ahead of (1, tick) for everything that
-        # has ever been useful, so the never-useful go first regardless of age.
-        candidates.sort(key=lambda o: (0, 0) if o.last_useful_tick is None
-                        else (1, o.last_useful_tick))
-        survivors = set(id(o) for o in self.organisms)
-        stale_ids = {id(o) for o in stale}
-        for organism in candidates:
-            if len(survivors) <= 1:
-                break
-            if id(organism) not in stale_ids and world.memory_used <= limit:
-                break
-            self.scrap_deposited += world.deposit_scrap(
-                organism.x, organism.y, len(organism.genome), organism.energy)
-            self.lifecycle_events.append({"kind": "death", "tick": world.tick,
-                                          "organism": organism, "cause": "eviction"})
-            organism.free_child(world)
-            world.release_memory(len(organism.genome))
-            self.deaths += 1
-            self.deaths_by_cause["eviction"] += 1
-            self.evicted = getattr(self, "evicted", 0) + 1
-            survivors.discard(id(organism))
-        if len(survivors) != len(self.organisms):
-            self.organisms = [o for o in self.organisms if id(o) in survivors]
+        survivors = []
+        for organism in self.organisms:
+            if id(organism) in doomed and len(survivors) + 1 < len(self.organisms):
+                self.scrap_deposited += world.deposit_scrap(
+                    organism.x, organism.y, len(organism.genome), organism.energy)
+                self.lifecycle_events.append({"kind": "death", "tick": tick,
+                                              "organism": organism,
+                                              "cause": "eviction"})
+                organism.free_child(world)
+                world.release_memory(len(organism.genome))
+                self.deaths += 1
+                self.deaths_by_cause["eviction"] += 1
+                self.evicted = getattr(self, "evicted", 0) + 1
+            else:
+                survivors.append(organism)
+        self.organisms = survivors
 
     def step(self) -> None:
         # Unworked tasks drift back up in price each tick (scarcity pricing).
