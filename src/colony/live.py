@@ -647,6 +647,12 @@ class Habitat:
                                   for row in world.scrap for value in row),
             "scrapTiles": sum(value > 0 for row in world.scrap for value in row),
             "scrapAvailable": round(getattr(world, "reclaim_pool", 0.0), 2),
+            # A working set, not a population: how many of the living have
+            # ever been useful to something other than themselves, and how
+            # many were reclaimed for not being.
+            "evicted": getattr(colony, "evicted", 0),
+            "usefulLiving": sum(1 for o in colony.organisms
+                                if getattr(o, "last_useful_tick", None) is not None),
             "reclaimPool": round(getattr(world, "reclaim_pool", 0.0), 2),
             "publishRefused": getattr(colony, "publish_refused", 0),
             "slotHeat": [round(v, 2) for v in getattr(world, "slot_heat", [])],

@@ -184,6 +184,18 @@ ISA = [
 # once here so recolonisation can ask what is inert at a destination instead of
 # a second copy of this list drifting out of step with the first.
 FEATURE_OPS = {
+    # Grazing is a feature here, and this colony does not have it. HARVEST
+    # executes as a nop, exactly like any other disabled opcode, so its number
+    # and glyph are unchanged and a genome still reads the same everywhere -
+    # it simply earns nothing here.
+    #
+    # The point: "a 12-op grazing loop is a complete answer to this world" was
+    # the reason nothing complex ever evolved. Remove grazing and it is not an
+    # answer to anything. What is left is tasks, salvage, and royalties from
+    # being CALLED by another organism. Income has to come from being useful to
+    # something else, which is the only thing that has ever forced structure in
+    # a real system.
+    "grazing": (Op.HARVEST,),
     "burn": (Op.BURN,),
     "bounty": (Op.OFFER,),
     "macro": (Op.DEFINE, Op.MACRO0, Op.MACRO1, Op.MACRO2, Op.MACRO3,
@@ -217,8 +229,69 @@ def build_ancestor() -> list[int]:
     ]
 
 
+def build_service_core() -> list[int]:
+    """The ancestor with its two harvests removed - replication, nothing else."""
+    return [Op.ALLOC, Op.COPY, Op.IFNOTDONE, Op.JMPB, Op.FORK, Op.SCAN, Op.MOVE]
+
+
 def build_founder_palette() -> list[list[int]]:
-    """Viable replicators with different immediately usable traits."""
+    """Founders for a colony with no grazing.
+
+    Same house style as the grazing palette: ingredients appended next to a
+    working replicator, never a working arrangement. Nothing here can earn on
+    the day it is seeded - it has to find the circuit. The seed stipend in
+    Colony.FOUNDER_ENERGY is what buys it the time to.
+    """
+    core = build_service_core()
+    return [
+        core,
+        # Two founders arrive with a WORKING task circuit rather than the
+        # ingredients for one. This breaks the house rule elsewhere in this
+        # palette, and it is deliberate.
+        #
+        # With grazing there is an income floor, so a founder can afford to
+        # spend generations discovering a circuit. Here there is no floor at
+        # all, and the seeded version of this palette went extinct in under
+        # 1000 ticks on all three seeds tried - no task ever solved, no
+        # royalty ever paid, dead before blind variation could assemble
+        # input/swap/input/nand/output in that order.
+        #
+        # So the question is not "can a service economy invent its first
+        # service from nothing" - measured, and the answer is no. It is "once
+        # one service exists, does it spread and does a call graph form".
+        # PEEK, COPYN, PUBLISH and CALL are all in this palette; the circuit is
+        # there to be acquired.
+        [*core, Op.INPUT, Op.SWAP, Op.INPUT, Op.NAND, Op.OUTPUT],
+        [*core, Op.PUBLISH, Op.INPUT, Op.SWAP, Op.INPUT, Op.NAND, Op.OUTPUT],
+        # task income: read, compute, submit
+        [*core, Op.INPUT, Op.NAND, Op.OUTPUT],
+        [*core, Op.INPUT, Op.INPUT, Op.OUTPUT],
+        [*core, Op.NAND, Op.OUTPUT],
+        [*core, Op.INPUT, Op.STORE, Op.LOAD, Op.OUTPUT],
+        [*core, Op.INC, Op.ADD, Op.OUTPUT],
+        [*core, Op.XOR, Op.OUTPUT],
+        # royalty income: publish something, and be called
+        [*core, Op.PUBLISH, Op.CALL],
+        [*core, Op.PUBLISH, Op.LOCATE, Op.CALL],
+        [*core, Op.CALL, Op.PUBLISH],
+        # reclaiming what died
+        [*core, Op.SALVAGE],
+        [*core, Op.SALVAGE, Op.SCAN, Op.MOVE],
+        # the bus, which is the only channel with no geometry
+        [*core, Op.POST, Op.FETCH],
+        [*core, Op.LOCATE, Op.FETCH],
+        [*core, Op.STORE, Op.LOAD],
+        # reading and copying a neighbour's code, since code is now the asset
+        [*core, Op.PEEK],
+        [*core, Op.PEEK, Op.COPYN],
+        [*core, Op.LINK],
+        [*core, Op.WRITE],
+        [*core, Op.BUILD],
+    ]
+
+
+def build_grazing_palette() -> list[list[int]]:
+    """The original palette, kept for reference and for migrant comparison."""
     core = build_ancestor()
     return [
         core,

@@ -91,7 +91,7 @@ class Colony:
                 position_index += 1
                 founder = Organism(
                     id=self._id(), genome=list(genome), x=x, y=y,
-                    lineage=lineage, energy=48.0,
+                    lineage=lineage, energy=self.FOUNDER_ENERGY,
                     lease_expires=self.world.tick + self.LEASE_FULL,
                 )
                 self.organisms.append(founder)
@@ -102,6 +102,86 @@ class Colony:
         value = self.next_id
         self.next_id += 1
         return value
+
+    # Seed capital. A grazing founder eats on its first tick; one here cannot
+    # earn until it finds a task circuit, a routine worth calling, or a corpse
+    # to salvage, and 48 energy buys about 120 instructions to do it in. This
+    # is a runway, not an income: it is paid once, at founding, and never
+    # again. If nothing finds a trade before it runs out, the colony dies, and
+    # that is a real answer rather than a bug.
+    FOUNDER_ENERGY = 200.0
+
+    # -- eviction ------------------------------------------------------------
+    # Nothing here starves and nothing ages out. A program does not get hungry;
+    # it runs until something needs the room. The colony holds as many
+    # organisms as its memory allows, and when that fills, the least recently
+    # useful one is reclaimed to make space - a working set with an eviction
+    # policy, which is how a computer system actually decides what stays
+    # resident.
+    #
+    # Energy does not kill. It is capital for REPRODUCTION only: an organism
+    # with nothing in hand persists indefinitely, it simply cannot fork. So
+    # being useless is not immediately fatal, it is sterile, and then it is
+    # fatal when something useful needs the pages.
+    #
+    # The ordering matters more than the threshold. Never-useful ranks strictly
+    # below useful-long-ago, so the FIRST organism to be useful for anything
+    # gains a permanent edge over everything that never has been. Without that
+    # this degrades to plain LRU, which selects for reproducing quickly rather
+    # than for being worth keeping - and a treadmill is not a gradient.
+    EVICTION_HIGH_WATER = 0.92   # fraction of memory_cap that triggers eviction
+    EVICTION_GRACE = 400         # ticks a newborn is safe, so it can act first
+    # A time-to-live on uselessness, and the part that actually does the work.
+    # Memory-pressure eviction alone is not enough: useless organisms never
+    # reproduce, so they never fill memory, so nothing is ever collected and
+    # being useless costs nothing at all - measured, 30,000 ticks with zero
+    # deaths and memory at 45%. A garbage collector does not wait for OOM to
+    # free an unreferenced object. Roughly one ordinary lifespan (max_age is
+    # 2400 elsewhere), so being useless costs about what living costs.
+    EVICTION_TTL = 3000
+
+    def _evict_unused(self) -> None:
+        """Reclaim the least recently useful organisms when memory is full."""
+        world = self.world
+        cap = getattr(world.config, "memory_cap", 0)
+        if cap <= 0 or not self.organisms:
+            return
+        limit = self.EVICTION_HIGH_WATER * cap
+        tick = world.tick
+        candidates = [o for o in self.organisms if o.age >= self.EVICTION_GRACE]
+
+        def idle_for(o):
+            last = o.last_useful_tick
+            return o.age if last is None else tick - last
+
+        # Collect anything unreferenced for a full lifespan, whatever the
+        # memory situation, then keep going on pressure alone if still tight.
+        stale = [o for o in candidates if idle_for(o) >= self.EVICTION_TTL]
+        if not stale and world.memory_used <= limit:
+            return
+        # (0, 0) for never-useful sorts ahead of (1, tick) for everything that
+        # has ever been useful, so the never-useful go first regardless of age.
+        candidates.sort(key=lambda o: (0, 0) if o.last_useful_tick is None
+                        else (1, o.last_useful_tick))
+        survivors = set(id(o) for o in self.organisms)
+        stale_ids = {id(o) for o in stale}
+        for organism in candidates:
+            if len(survivors) <= 1:
+                break
+            if id(organism) not in stale_ids and world.memory_used <= limit:
+                break
+            self.scrap_deposited += world.deposit_scrap(
+                organism.x, organism.y, len(organism.genome), organism.energy)
+            self.lifecycle_events.append({"kind": "death", "tick": world.tick,
+                                          "organism": organism, "cause": "eviction"})
+            organism.free_child(world)
+            world.release_memory(len(organism.genome))
+            self.deaths += 1
+            self.deaths_by_cause["eviction"] += 1
+            self.evicted = getattr(self, "evicted", 0) + 1
+            survivors.discard(id(organism))
+        if len(survivors) != len(self.organisms):
+            self.organisms = [o for o in self.organisms if id(o) in survivors]
 
     def step(self) -> None:
         # Unworked tasks drift back up in price each tick (scarcity pricing).
@@ -115,7 +195,10 @@ class Colony:
             organism.execute(self)
         survivors = []
         for organism in self.organisms:
-            if organism.energy <= 0:
+            if "eviction" in self.features:
+                # No hunger, no ageing. Death arrives only from _evict_unused.
+                cause = None
+            elif organism.energy <= 0:
                 cause = "starvation"
             elif "lease" in self.features:
                 # No senescence here: the lease is the only clock.
@@ -139,6 +222,8 @@ class Colony:
             else:
                 survivors.append(organism)
         self.organisms = survivors
+        if "eviction" in self.features:
+            self._evict_unused()
         if "bounty" in self.features:
             self.expire_bounties()
         self.world.step()
@@ -161,6 +246,16 @@ class Colony:
 
     def fork(self, parent: Organism) -> None:
         if parent.child is None or parent.copy_index != len(parent.genome):
+            return
+        # Where nothing starves, energy is what you need to make a COPY, not
+        # what you need to stay alive. A useless organism persists; it just
+        # never reproduces, and is first out when the pages are wanted.
+        if "eviction" in self.features and parent.energy < self.CHILD_ENERGY:
+            # Release the buffer. Returning while still holding it left the
+            # parent retrying a fork it could never afford, with the words
+            # still reserved - every birth in the colony stopped and memory
+            # never came back.
+            parent.free_child(self.world)
             return
         reserved = len(parent.genome)
         proposal = list(parent.child)

@@ -17,6 +17,12 @@ class Organism:
     generation: int = 0
     energy: float = 32.0
     age: int = 0
+    # Last tick this organism was useful to something other than itself:
+    # solved a task the system set, had its published routine called, or
+    # had its code read by a neighbour. None means never. A dataclass
+    # default is also a class attribute, so an organism restored from a
+    # checkpoint written before this field still answers.
+    last_useful_tick: int | None = None
     ip: int = 0
     a: int = 0
     b: int = 0
@@ -240,6 +246,7 @@ class Organism:
                 self.energy += reward * colony.world.task_reward_multiplier(self.x, self.y)
                 self.tasks_solved[name] = self.tasks_solved.get(name, 0) + 1
                 colony.note_task(name)
+                self.last_useful_tick = colony.world.tick
         elif op == Op.IFZERO and self.a != 0:
             next_ip = (self.ip + 2) % len(self.genome)
         elif op == Op.PUSH:
@@ -270,6 +277,8 @@ class Organism:
                 self.a = other.genome[self.b % len(other.genome)]
                 self.neighbor_reads = getattr(self, "neighbor_reads", 0) + 1
                 colony.neighbor_reads += 1
+                # Credit goes to the one being READ, not the reader.
+                other.last_useful_tick = colony.world.tick
         elif op == Op.COPYN and self.child is not None and self.copy_index < len(self.genome):
             # Horizontal transfer of a contiguous SEGMENT, not a single word.
             # Single-word transfer is functionally inert: acquiring a neighbour's
@@ -442,6 +451,9 @@ class Organism:
                         owner.royalties = getattr(owner, "royalties", 0.0) + cut
                         colony.royalties = getattr(colony, "royalties", 0.0) + cut
                         colony.royalty_events = getattr(colony, "royalty_events", 0) + 1
+                        # Somebody ran this organism's code. That is the
+                        # purest form of being worth keeping here.
+                        owner.last_useful_tick = colony.world.tick
             self.call_slot = -1
         self.ip = next_ip
 
