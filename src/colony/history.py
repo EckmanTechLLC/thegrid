@@ -132,7 +132,17 @@ class LineageHistory:
                       # wrong. lineages counts distinct founder indices among
                       # the living; lineage_top is the largest one's fraction.
                       'lineages_sum',
-                      'lineage_top_sum'):
+                      'lineage_top_sum',
+                      # The two mechanisms added in September had no fossil
+                      # record at all. bit rot and eviction were both visible
+                      # only in /api/state, which is ephemeral and resets on
+                      # reseed - a full day of running would have produced
+                      # nothing analysable for either of them.
+                      'bit_flips_end',
+                      'evicted_end',
+                      'useful_sum',
+                      'royalties_end',
+                      'tasks_solved_end'):
             if _name not in ecology_columns:
                 self._db.execute(
                     f"ALTER TABLE ecology_buckets ADD COLUMN {_name} REAL NOT NULL DEFAULT 0")
@@ -282,7 +292,9 @@ class LineageHistory:
                        bus_writes: int = 0, bus_reads: int = 0,
                        published: int = 0, calls: int = 0,
                        publish_refused: int = 0, salvaged: float = 0.0,
-                       lineages: int = 0, lineage_top: float = 0.0) -> None:
+                       lineages: int = 0, lineage_top: float = 0.0,
+                       bit_flips: int = 0, evicted: int = 0, useful: int = 0,
+                       royalties: float = 0.0, tasks_solved: int = 0) -> None:
         """Store bounded per-500-tick ecology aggregates, never per-frame rows."""
         with self._lock:
             if epoch not in self._last_ecology_tick:
@@ -300,8 +312,9 @@ class LineageHistory:
                     population_min,population_max,diversity_sum,dominance_sum,
                     genome_length_sum,resource_sum,built_sum,signals_sum,
                     cost_sum,thermal_excess_sum,machine_spare_sum,regen_sum,reclaim_pool_sum,slots_held_sum,bus_writes_end,bus_reads_end,published_end,calls_end,publish_refused_end,salvaged_end,
-                    lineages_sum,lineage_top_sum)
-                VALUES(?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    lineages_sum,lineage_top_sum,
+                    bit_flips_end,evicted_end,useful_sum,royalties_end,tasks_solved_end)
+                VALUES(?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(epoch,bucket) DO UPDATE SET
                     end_tick=excluded.end_tick,
                     samples=samples+1,
@@ -327,12 +340,18 @@ class LineageHistory:
                     publish_refused_end=excluded.publish_refused_end,
                     salvaged_end=excluded.salvaged_end,
                     lineages_sum=lineages_sum+excluded.lineages_sum,
-                    lineage_top_sum=lineage_top_sum+excluded.lineage_top_sum
+                    lineage_top_sum=lineage_top_sum+excluded.lineage_top_sum,
+                    bit_flips_end=excluded.bit_flips_end,
+                    evicted_end=excluded.evicted_end,
+                    useful_sum=useful_sum+excluded.useful_sum,
+                    royalties_end=excluded.royalties_end,
+                    tasks_solved_end=excluded.tasks_solved_end
             """, (epoch, bucket, tick, tick, population, population, population,
                   diversity, dominance, genome_length, resources, built, signals,
                   cost, thermal_excess, machine_spare, regen, reclaim_pool,
                   slots_held, bus_writes, bus_reads, published, calls,
-                  publish_refused, salvaged, lineages, lineage_top))
+                  publish_refused, salvaged, lineages, lineage_top,
+                  bit_flips, evicted, useful, royalties, tasks_solved))
             self._last_ecology_tick[epoch] = tick
 
     def flush(self) -> None:

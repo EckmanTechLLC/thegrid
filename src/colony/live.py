@@ -478,7 +478,20 @@ class Habitat:
             publish_refused=getattr(colony, "publish_refused", 0),
             salvaged=getattr(colony, "salvaged", 0.0),
             lineages=len(lineage_counts), lineage_top=lineage_top,
-        )
+            # The September mechanisms. Cumulative counters (bit flips,
+            # evictions, royalties, tasks) are stored as last-value so a delta
+            # can be taken between buckets; the useful head-count is
+            # instantaneous, so it averages like population does.
+            bit_flips=getattr(colony, "bit_flips", 0),
+            evicted=getattr(colony, "evicted", 0),
+            useful=sum(1 for o in colony.organisms
+                       if getattr(o, "last_useful_tick", None) is not None),
+            royalties=getattr(colony, "royalties", 0.0),
+            # Distinct tasks solved at least once this epoch. Summing the
+            # living organisms' counters instead would fall whenever they die,
+            # which makes a useless time series; task_firsts only grows, so a
+            # bucket-to-bucket comparison shows the repertoire widening.
+            tasks_solved=len(getattr(colony, "task_firsts", ()) or ()))
         details = [self._organism_detail(o, tick=world.tick) for o in colony.organisms]
         self.organism_latest = {(self.epoch, item["id"]): item for item in details}
         tiles: dict[tuple[int, int], list[dict]] = {}
