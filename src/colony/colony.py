@@ -139,6 +139,12 @@ class Colony:
     # free an unreferenced object. Roughly one ordinary lifespan (max_age is
     # 2400 elsewhere), so being useless costs about what living costs.
     EVICTION_TTL = 3000
+    # How recently an organism must have been useful to be allowed to
+    # copy itself. Shorter than the eviction TTL on purpose: there is a
+    # band where you have earned the right to stay but not the right to
+    # reproduce, which is what stops one early success breeding forever
+    # on the strength of it.
+    REPRODUCTION_WINDOW = 500
 
     def _evict_unused(self) -> None:
         """Reclaim the least recently useful organisms when memory is full."""
@@ -247,16 +253,25 @@ class Colony:
     def fork(self, parent: Organism) -> None:
         if parent.child is None or parent.copy_index != len(parent.genome):
             return
-        # Where nothing starves, energy is what you need to make a COPY, not
-        # what you need to stay alive. A useless organism persists; it just
-        # never reproduces, and is first out when the pages are wanted.
-        if "eviction" in self.features and parent.energy < self.CHILD_ENERGY:
-            # Release the buffer. Returning while still holding it left the
-            # parent retrying a fork it could never afford, with the words
-            # still reserved - every birth in the colony stopped and memory
-            # never came back.
-            parent.free_child(self.world)
-            return
+        # Usefulness is the currency, not energy. Gating on an energy balance
+        # did not work and could not: a task pays about 13.5 and a child costs
+        # 16, so from a floor of zero a single solve never buys one and the
+        # instruction costs drain it before the next arrives. Births stalled at
+        # ~124 and the colony went sterile.
+        #
+        # So energy is out of it. Existing is free, reproduction is earned by
+        # having been useful recently, and death is eviction for disuse. A
+        # process does not pay rent to keep running - it earns the right to
+        # spawn by being worth something to something else.
+        if "eviction" in self.features:
+            last = parent.last_useful_tick
+            if last is None or self.world.tick - last > self.REPRODUCTION_WINDOW:
+                # Release the buffer. Returning while still holding it left the
+                # parent retrying a fork it could never afford, with the words
+                # still reserved - every birth stopped and memory never
+                # came back.
+                parent.free_child(self.world)
+                return
         reserved = len(parent.genome)
         proposal = list(parent.child)
         mutation_events = list(getattr(parent, "child_mutations", []))
@@ -276,14 +291,21 @@ class Colony:
             return
         dx, dy = self.rng.choice([(0, -1), (1, 0), (0, 1), (-1, 0)])
         x, y = self.world.wrap(parent.x + dx, parent.y + dy)
-        if parent.energy <= self.CHILD_ENERGY:
+        # The second energy gate, and the one that actually mattered. With
+        # eviction the top-of-function gate is usefulness, but this check sat
+        # further down and still demanded energy > CHILD_ENERGY - which floors
+        # at zero and cannot climb, so it rejected 5,910 of 5,942 permitted
+        # forks and the colony looked sterile for reasons that had nothing to
+        # do with the rule I thought I had written.
+        if "eviction" not in self.features and parent.energy <= self.CHILD_ENERGY:
             self.world.release_memory(len(proposal))
             return
         child = Organism(self._id(), proposal, x, y, parent.lineage,
                            generation=parent.generation + 1,
                            energy=self.CHILD_ENERGY,
                            lease_expires=self.world.tick + self.LEASE_FULL)
-        parent.energy -= self.CHILD_ENERGY
+        if "eviction" not in self.features:
+            parent.energy -= self.CHILD_ENERGY
         parent.births += 1
         self.births += 1
         self.mutation_mechanisms.update(mutation_events)

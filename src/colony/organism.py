@@ -130,6 +130,15 @@ class Organism:
             colony.experimental_ops[name] += 1
         self.energy -= ISA[op].cost * colony.world.instruction_cost_multiplier(
             op, self.x, self.y)
+        if self.energy < 0.0 and "eviction" in colony.features:
+            # No debt. There is no negative memory and no negative CPU time -
+            # you are broke, and broke is recoverable. Without this floor,
+            # removing death-by-starvation left energy as a counter that only
+            # descends: every organism reached about -3000, which put the cost
+            # of a child permanently out of reach. The colony went immortal,
+            # useful, and completely sterile - 54 founders still solving tasks
+            # at tick 4817 and not one birth since 2200.
+            self.energy = 0.0
         colony.world.charge_instruction()
         self.age += 1
         next_ip = self.ip if from_routine else (self.ip + 1) % len(self.genome)
