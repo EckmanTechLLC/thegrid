@@ -52,6 +52,20 @@ class OdinMutator:
         self.failures = 0
         self._pending_parent = None
 
+    @property
+    def last_events(self) -> list[str]:
+        """Gene-scale events from the fallback mutator, which does the work.
+
+        Colony.fork reads self.mutator.last_events. That attribute lives on the
+        BASE mutator, not on this wrapper, so getattr returned [] and every
+        insertion, deletion, burst, duplication and inversion in the two odin
+        colonies went unrecorded for the life of the project - their
+        mutation_origins tables show only point_substitution and
+        segment_transfer, which are recorded elsewhere. The mutations were
+        always happening; the fossil record simply never saw them.
+        """
+        return getattr(self.base, "last_events", [])
+
     def copy_error(self, word: int, rng: random.Random) -> int:
         return self.base.copy_error(word, rng)
 
