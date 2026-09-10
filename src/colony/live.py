@@ -12,6 +12,7 @@ import sys
 import traceback
 import pickle
 import shutil
+import socket
 import urllib.request
 import signal
 import time
@@ -23,8 +24,8 @@ from aiohttp import web
 
 from .colony import Colony
 from .history import LineageHistory, genome_id
-from .isa import (isa_version, ISA, NAME_TO_OP, Op, SELF_SUFFICIENT, build_ancestor,
-                  build_founder_palette, inert_ops)
+from .isa import (isa_table, isa_version, ISA, NAME_TO_OP, Op, SELF_SUFFICIENT,
+                  build_ancestor, build_founder_palette, inert_ops)
 from .odin_operator import OdinMutator
 from .record import ALPHABET, encode_energy, encode_genome, encode_positions
 from .tasks import TemporalTaskEnvironment
@@ -46,8 +47,13 @@ class Habitat:
     def __init__(self, state_path: Path, seed: int = 42, founders: int | None = None,
                  physical: bool = True, mutator_kind: str = "odin",
                  width: int = 48, height: int = 48, name: str | None = None,
-                 features: set | None = None, peers: list | None = None):
+                 features: set | None = None, peers: list | None = None,
+                 deployment: str | None = None):
         self.state_path = state_path
+        # Two operators run this code and publish under the same names, so a
+        # colony name alone does not say whose record a genome came from.
+        self.deployment = (deployment or os.environ.get("THEGRID_DEPLOYMENT")
+                           or socket.gethostname())
         # Derived, never a constant. It was 13 against a palette that had grown
         # to 21, so Colony.__init__ silently used genomes[0:13] and the last
         # eight founders never entered the world at all - including the only
@@ -76,7 +82,8 @@ class Habitat:
         self.started_at = time.time()
         self.events: deque[dict] = deque(maxlen=40)
         self.colony = self._load_or_create()
-        self.history = LineageHistory(state_path.with_name("history.sqlite3"))
+        self.history = LineageHistory(state_path.with_name("history.sqlite3"),
+                                      features=self.features, mutator=self.mutator_kind)
         self.history.start_epoch(self.epoch, self.seed, self.started_at,
                                  self.colony.organisms, partial=True,
                                  observed_tick=self.colony.world.tick)
@@ -548,6 +555,7 @@ class Habitat:
             "ancestor": encode_genome(build_ancestor()),
             "tasks": colony.task_firsts,
             "name": self.name,
+            "deployment": self.deployment,
             # Retained for the viewer's quadrant readout; it no longer gates
             # any regeneration bonus.
             "climatePhase": getattr(world, "machine_band", 0),
@@ -898,6 +906,50 @@ async def create_app(habitat: Habitat, ticks_per_second: int) -> web.Application
 
     app.router.add_get("/api/emigrants", emigrants)
 
+    # The fossil record, one genome at a time, at an id anyone can recompute.
+    # Read-only and unauthenticated like everything else here; the record is
+    # keyed by content hash and never truncated, so a URL keeps answering
+    # after the colony that minted it has recolonised. What it deliberately
+    # does not carry is any field that ranks - a reader applies their own
+    # rule to the facts (EckmanTechLLC/thegrid#5).
+    def _export_envelope(**body) -> dict:
+        return {"colony": habitat.name, "deployment": habitat.deployment,
+                # What this process runs NOW. Each record carries what was
+                # recorded at its own first sighting; the two can differ.
+                "live": {"isaVersion": isa_version(),
+                         "features": sorted(habitat.features),
+                         "mutator": habitat.mutator_kind},
+                **body}
+
+    async def genome_record(request: web.Request) -> web.Response:
+        record = await asyncio.to_thread(habitat.history.genome_record,
+                                         request.match_info["genome_id"])
+        if record is None:
+            raise web.HTTPNotFound(text="no genome with that id in this record")
+        return web.json_response(_export_envelope(genome=record))
+
+    async def genome_records(request: web.Request) -> web.Response:
+        try:
+            since_epoch = int(request.query.get("since_epoch", "0"))
+            limit = int(request.query.get("limit", habitat.history.EXPORT_PAGE))
+            records, cursor = await asyncio.to_thread(
+                habitat.history.genome_records, since_epoch,
+                request.query.get("after"), limit)
+        except ValueError:
+            raise web.HTTPBadRequest(
+                text="since_epoch and limit are integers; after is a cursor "
+                     "from a previous page")
+        return web.json_response(
+            _export_envelope(sinceEpoch=since_epoch, genomes=records, next=cursor),
+            dumps=lambda x: json.dumps(x, separators=(",", ":")))
+
+    async def genome_isa(request: web.Request) -> web.Response:
+        return web.json_response({"isaVersion": isa_version(), **isa_table()})
+
+    app.router.add_get("/api/genomes", genome_records)
+    app.router.add_get("/api/genomes/isa", genome_isa)
+    app.router.add_get("/api/genomes/{genome_id:[0-9a-f]{16}}", genome_record)
+
     async def start(app: web.Application) -> None:
         app["runner"] = asyncio.create_task(run_habitat(habitat, ticks_per_second))
         def restart_on_failure(task: asyncio.Task) -> None:
@@ -940,6 +992,10 @@ def main() -> None:
     parser.add_argument("--retire-current-epoch", action="store_true")
     parser.add_argument("--name", default=None,
                         help="display name; defaults to the state directory")
+    parser.add_argument("--deployment", default=None,
+                        help="who runs this colony, carried on every exported "
+                             "genome; defaults to THEGRID_DEPLOYMENT, then the "
+                             "hostname")
     parser.add_argument("--features", default="",
                         help="comma-separated: burn,bounty,macro")
     parser.add_argument("--peers", default="",
@@ -950,7 +1006,8 @@ def main() -> None:
     args = parser.parse_args()
     habitat = Habitat(args.state, mutator_kind=args.mutator, name=args.name,
                       features={f.strip() for f in args.features.split(",") if f.strip()},
-                      peers=[p.strip() for p in args.peers.split(",") if p.strip()])
+                      peers=[p.strip() for p in args.peers.split(",") if p.strip()],
+                      deployment=args.deployment)
     if args.retire_current_epoch:
         habitat.retire_current_epoch()
         habitat.history.close()

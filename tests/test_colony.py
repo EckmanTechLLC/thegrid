@@ -1,15 +1,18 @@
 from src.colony.colony import Colony
-from src.colony.isa import ISA, Op, build_ancestor, build_founder_palette
-from src.colony.record import encode_positions
+from src.colony.isa import ISA, Op, build_ancestor, build_founder_palette, isa_version
+from src.colony.record import encode_genome, encode_positions
 from src.colony.mutation import ExperimentalMutator, RandomMutator, parse_genome
 from src.colony.world import World, WorldConfig
 from src.colony.live import Habitat
 from src.colony.odin_operator import OdinMutator
 from src.colony.organism import Organism
-from src.colony.history import LineageHistory
+from src.colony.history import LineageHistory, genome_id
 from src.colony.tasks import TemporalTaskEnvironment
+import asyncio
+import hashlib
 import json
 import random
+import sqlite3
 import pytest
 
 from collections import Counter
@@ -132,6 +135,29 @@ def test_odin_operator_queues_and_consumes_authored_variant(tmp_path):
     assert proposal != original
     assert mutator.accepted == 1
     assert not (tmp_path / "proposal.json").exists()
+
+
+def test_odin_birth_that_consumed_a_proposal_is_its_own_mechanism(tmp_path):
+    mutator = OdinMutator(tmp_path, rate=1.0, energy_cost=1.0)
+    mutator.base.point_rate = 0
+    mutator.base.indel_rate = 0
+    mutator.base.burst_rate = 1.0          # every blind birth leaves an event
+    parent = Organism(1, build_ancestor(), 0, 0, 0, energy=100)
+    mutator.offer(parent)
+    mutator.mutate_at_birth(list(parent.genome), random.Random(1))
+    assert mutator.last_events == ["random_burst"]
+
+    names = ["harvest", "alloc", "copy", "ifnotdone", "jmpb", "fork"]
+    (tmp_path / "proposal.json").write_text(json.dumps({"genome": names}))
+    mutator.offer(parent)
+    mutator.mutate_at_birth(list(parent.genome), random.Random(1))
+    # The base never ran for this birth; its stale burst must not be blamed
+    # on the model's genome.
+    assert mutator.last_events == ["model_proposal"]
+
+    mutator.offer(parent)
+    mutator.mutate_at_birth(list(parent.genome), random.Random(2))
+    assert mutator.last_events == ["random_burst"]
 
 
 def test_ecology_instructions_enable_communication_construction_and_parasitism():
@@ -469,6 +495,105 @@ def test_history_links_mutation_mechanisms_to_later_reproduction(tmp_path):
     assert mechanism["later_reproductions"] == 1
     assert mechanism["max_generation_span"] == 1
     history.close()
+
+
+def test_history_exports_genomes_at_stable_ids_without_ranking_them(tmp_path):
+    history = LineageHistory(tmp_path / "export.sqlite3",
+                             features={"predation", "lease"}, mutator="odin")
+    ancestor = SimpleNamespace(genome=[Op.HARVEST], generation=0)
+    mutant = SimpleNamespace(genome=[Op.HARVEST, Op.MOVE], generation=7)
+    history.start_epoch(4, 1, 100.0, organisms=[ancestor])
+    history.record(4, [{"kind": "birth", "tick": 10, "organism": mutant,
+                        "parent": ancestor,
+                        "mutations": ["point_substitution", "model_proposal"]}])
+    # A later birth re-deriving the same sequence by another route does not
+    # rewrite what the first one was made by.
+    history.record(4, [{"kind": "birth", "tick": 30, "organism": mutant,
+                        "parent": ancestor, "mutations": ["segment_transfer"]}])
+    identity = genome_id(mutant.genome)
+    record = history.genome_record(identity)
+    assert record == {
+        "genome_id": identity,
+        "encoded": encode_genome(mutant.genome),
+        "instructions": ["harvest", "move"],
+        "first_epoch": 4, "first_tick": 10, "first_generation": 7,
+        "parent_genome_id": genome_id(ancestor.genome),
+        "mechanisms": ["model_proposal", "point_substitution"],
+        "model_proposed": True,
+        "isa_version": isa_version(),
+        "features": ["lease", "predation"],
+        "mutator": "odin",
+    }
+    assert hashlib.sha256(bytes(mutant.genome)).hexdigest()[:16] == identity
+    assert not any(key in record for key in ("births", "tier", "age_ticks"))
+    assert history.genome_record("0000000000000000") is None
+
+    first, cursor = history.genome_records(limit=1)
+    assert [r["genome_id"] for r in first] == [genome_id(ancestor.genome)]
+    assert first[0]["model_proposed"] is False
+    assert first[0]["parent_genome_id"] is None
+    rest, done = history.genome_records(after=cursor, limit=1)
+    assert [r["genome_id"] for r in rest] == [identity]
+    assert history.genome_records(after=done)[0] == []
+    assert history.genome_records(since_epoch=5)[0] == []
+    with pytest.raises(ValueError):
+        history.genome_records(after="not-a-cursor")
+    history.close()
+
+    # A record written before the provenance columns existed answers "not
+    # recorded", never today's flags.
+    old = sqlite3.connect(tmp_path / "export.sqlite3")
+    old.execute("UPDATE genomes SET isa_version=NULL, features=NULL, mutator=NULL")
+    old.commit()
+    old.close()
+    reopened = LineageHistory(tmp_path / "export.sqlite3", mutator="random")
+    aged = reopened.genome_record(identity)
+    assert (aged["isa_version"], aged["features"], aged["mutator"]) == (None, None, None)
+    assert aged["model_proposed"] is None
+    reopened.close()
+
+
+def test_genome_export_routes_serve_the_record_and_its_table(tmp_path):
+    from aiohttp.test_utils import TestClient, TestServer
+    from src.colony.live import create_app
+
+    habitat = Habitat(tmp_path / "export.pkl", seed=3, founders=2, physical=False,
+                      mutator_kind="random", name="Colony Test",
+                      deployment="test-bench")
+    for _ in range(40):
+        habitat.step()
+    assert habitat.latest["deployment"] == "test-bench"
+
+    async def exercise() -> None:
+        app = await create_app(habitat, ticks_per_second=10)
+        async with TestClient(TestServer(app)) as client:
+            page = await (await client.get("/api/genomes")).json()
+            assert page["colony"] == "Colony Test"
+            assert page["deployment"] == "test-bench"
+            assert page["live"] == {"isaVersion": isa_version(), "features": [],
+                                    "mutator": "random"}
+            assert page["genomes"] and page["next"] is None
+            first = page["genomes"][0]
+            assert first["first_epoch"] == 1 and first["mutator"] == "random"
+
+            table = await (await client.get("/api/genomes/isa")).json()
+            body = json.dumps([[o["name"], o["cost"]] for o in table["opcodes"]],
+                              separators=(",", ":"))
+            recomputed = hashlib.sha256(
+                f"{table['encoding']}|{body}".encode()).hexdigest()[:12]
+            assert table["isaVersion"] == recomputed == first["isa_version"]
+            names = [o["name"] for o in table["opcodes"]]
+            ops = [names.index(n) for n in first["instructions"]]
+            assert hashlib.sha256(bytes(ops)).hexdigest()[:16] == first["genome_id"]
+
+            one = await client.get(f"/api/genomes/{first['genome_id']}")
+            assert one.status == 200
+            assert (await one.json())["genome"] == first
+            assert (await client.get("/api/genomes/0000000000000000")).status == 404
+            assert (await client.get("/api/genomes?since_epoch=x")).status == 400
+            assert (await client.get("/api/genomes?after=bad")).status == 400
+
+    asyncio.run(exercise())
 
 
 def test_operator_can_retire_living_epoch_without_calling_it_extinct(tmp_path):

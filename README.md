@@ -207,6 +207,50 @@ organism. The viewer renders one server-sent frame per completed tick with no
 interpolation, so real thermal pauses stay visible; clicking a tile follows an
 organism across ticks and reports its cause of death if it dies while selected.
 
+### Exporting genomes
+
+The fossil record is readable one genome at a time, unauthenticated, at an id
+that does not move:
+
+    GET /api/genomes/<genome_id>                 one record
+    GET /api/genomes?since_epoch=27&limit=100    a page, oldest first; follow `next`
+    GET /api/genomes/isa                         the opcode table the ids mean something against
+
+`genome_id` is the first 16 hex digits of SHA-256 over the sequence as bytes,
+one byte per instruction. It is a content hash, so it survives recolonisation
+by construction and two colonies that evolve the same sequence share it. Each
+record carries the sequence (`encoded`, the viewer's glyph string, and
+`instructions`, the same words by name), `first_epoch`, `first_tick` and
+`first_generation` where the sequence was first seen here, `parent_genome_id`,
+the `mechanisms` on that first birth - the eight blind ones plus
+`model_proposal` where an `odin` birth consumed an operator's proposal -
+`model_proposed` as a plain yes, no, or `null` for rows older than the tag,
+and the `isa_version`, `features` and `mutator` that were running when it was
+first seen. The envelope names the `colony`, the `deployment` (`--deployment`
+or `THEGRID_DEPLOYMENT`, defaulting to the hostname) and what the process runs
+`live`, which a record's own fields may lawfully disagree with.
+
+Nothing in a record ranks it. Births, ages, tiers and "hireable" are not there
+on purpose: they would be this project asserting fitness, which is the claim it
+keeps getting wrong. Whoever consumes the record applies their own rule.
+
+A reader checks a record without trusting this server. Take the ISA from
+`/api/genomes/isa`, map each name in `instructions` to its index, and
+recompute:
+
+    ops = [names.index(n) for n in record["instructions"]]
+    sha256(bytes(ops)).hexdigest()[:16] == record["genome_id"]
+
+and for the table itself, hash the encoding and the `[name, cost]` pairs in
+order as compact JSON:
+
+    body = json.dumps([[o["name"], o["cost"]] for o in table["opcodes"]], separators=(",", ":"))
+    sha256(f"{table['encoding']}|{body}".encode()).hexdigest()[:12] == table["isaVersion"]
+
+A mismatch on either means the record and the table it claims to belong to
+are not the ones being served, and no field of the record should be read
+until that is explained.
+
 ## License
 
 MIT. See `LICENSE`.

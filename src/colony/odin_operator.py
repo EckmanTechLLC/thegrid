@@ -52,6 +52,11 @@ class OdinMutator:
         self.failures = 0
         self._pending_parent = None
 
+    # Whether the most recent birth consumed a proposal. A class default, like
+    # request_ttl above, so a checkpoint pickled before this existed unpickles
+    # as "blind" rather than raising.
+    _proposal_consumed = False
+
     @property
     def last_events(self) -> list[str]:
         """Gene-scale events from the fallback mutator, which does the work.
@@ -63,7 +68,18 @@ class OdinMutator:
         mutation_origins tables show only point_substitution and
         segment_transfer, which are recorded elsewhere. The mutations were
         always happening; the fossil record simply never saw them.
+
+        A birth that consumed a proposal is its own mechanism. The base
+        mutator never ran for it, so reading the base's events here would
+        attribute the PREVIOUS birth's blind edits to a model-authored genome
+        - and nothing else in the fossil record says which births were
+        proposed and which were blind. For three days in September the
+        operator answered ~93% of requests with empty content, so the odin
+        arms ran mostly blind; per colony that is invisible after the fact,
+        per genome it is this one word.
         """
+        if self._proposal_consumed:
+            return ["model_proposal"]
         return getattr(self.base, "last_events", [])
 
     def copy_error(self, word: int, rng: random.Random) -> int:
@@ -78,6 +94,7 @@ class OdinMutator:
     def mutate_at_birth(self, genome: list[int], rng: random.Random) -> list[int]:
         parent = self._pending_parent
         self._pending_parent = None
+        self._proposal_consumed = False
         if parent is None or rng.random() >= self.rate or parent.energy < self.energy_cost:
             return self.base.mutate_at_birth(genome, rng)
         self.queue.mkdir(parents=True, exist_ok=True)
@@ -94,6 +111,7 @@ class OdinMutator:
                 parent.energy -= self.energy_cost
                 self.calls += 1
                 self.accepted += 1
+                self._proposal_consumed = True
                 return variant
             except Exception:
                 self.failures += 1
