@@ -261,3 +261,26 @@ def disassemble(genome: list[int], annotate: bool = True) -> str:
         name = ISA[word].name if 0 <= word < NUM_OPS else f"invalid({word})"
         lines.append(f"{index:03d}: {name}" if annotate else f"{index}: {name}")
     return "\n".join(lines)
+
+
+def isa_version() -> str:
+    """Identity of THIS colony's instruction table.
+
+    A genome is only meaningful against the table that produced it. Colony
+    eight packs (op, src, dst) into one word, so its glyphs mean something
+    different from a tape colony's, and colony three runs different
+    instruction costs. An opcode histogram computed against the wrong table is
+    a wrong answer that still looks like a number - which is exactly why
+    anything exporting a genome has to name the table alongside it.
+
+    Covers the opcode names in order, their costs, and the encoding. Anyone
+    holding a sequence can recompute this and check it matches the record.
+    """
+    import hashlib as _h, json as _j
+    body = _j.dumps([[item.name, item.cost] for item in ISA], separators=(",", ":"))
+    try:
+        from .isa import unpack  # noqa: F401
+        encoding = "packed-op-src-dst"
+    except ImportError:
+        encoding = "tape"
+    return _h.sha256(f"{encoding}|{body}".encode()).hexdigest()[:12]
