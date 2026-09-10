@@ -23,7 +23,7 @@ from aiohttp import web
 
 from .colony import Colony
 from .history import LineageHistory, genome_id
-from .isa import (ISA, NAME_TO_OP, Op, SELF_SUFFICIENT, build_ancestor,
+from .isa import (isa_version, ISA, NAME_TO_OP, Op, SELF_SUFFICIENT, build_ancestor,
                   build_founder_palette, inert_ops, pack, unpack)
 from .odin_operator import OdinMutator
 from .record import ALPHABET, encode_energy, encode_genome, encode_positions
@@ -541,6 +541,10 @@ class Habitat:
                                            (max(strains) + 1) if strains else 0))],
             "dominant": encode_genome(genome), "carriers": carriers,
             "isa": [item.name for item in ISA],
+            # Names the table these glyphs mean something against. A
+            # histogram computed against the wrong one is a wrong answer
+            # that still looks like a number.
+            "isaVersion": isa_version(),
             "ancestor": encode_genome(build_ancestor()),
             "tasks": colony.task_firsts,
             "name": self.name,
