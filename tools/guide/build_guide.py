@@ -142,6 +142,37 @@ def probe(tree: Path) -> dict:
     return json.loads(result.stdout)
 
 
+
+def snapshot_fields(tree: Path) -> list[tuple[str, str]]:
+    """Every /api/state key, with the expression that produces it.
+
+    The guide documented configuration and nothing else, so there was no
+    answer anywhere to "what does this field actually contain". `tasks` maps a
+    task to the TICK IT WAS FIRST SOLVED AT; read as a tally it turns a
+    timestamp into a count, which is exactly the mistake it caused. The fleet
+    page had it right - it renders Object.keys(tasks).length - and so did its
+    own tooltip; a terminal query of the raw JSON bypassed both.
+
+    Parsed from the source rather than written down, so it cannot drift.
+    """
+    import ast
+    source = (tree / "src/colony/live.py").read_text()
+    module = ast.parse(source)
+    best: list[tuple[str, str]] = []
+    for node in ast.walk(module):
+        if not isinstance(node, ast.Dict) or len(node.keys) < 20:
+            continue
+        pairs = []
+        for key, value in zip(node.keys, node.values):
+            if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                expr = ast.get_source_segment(source, value) or "?"
+                expr = " ".join(expr.split())
+                pairs.append((key.value, expr[:96]))
+        if len(pairs) > len(best):
+            best = pairs
+    return best
+
+
 def build() -> str:
     ref = HOME / "odin" / REFERENCE
     rows, details = [], []
@@ -223,6 +254,24 @@ def build() -> str:
                    f"{spread:.1f}x spread. A population concentrated in one quadrant is "
                    f"the map being obeyed, not a behaviour to explain — check this table "
                    f"before reaching for any other reason.\n")
+
+    # A data dictionary, because the guide had none and a field read wrongly
+    # is worse than a field not read at all.
+    fields = snapshot_fields(ref)
+    if fields:
+        out.append("\n## What every `/api/state` field actually contains\n")
+        out.append("Parsed from the snapshot in `live.py`, not written down. Read the "
+                   "expression, not the field name: several of these do not mean what "
+                   "they sound like.\n")
+        out.append("| field | produced by |")
+        out.append("|---|---|")
+        for name, expr in fields:
+            out.append(f"| `{name}` | `{expr}` |")
+        out.append("\n**`tasks` is the trap.** It is `colony.task_firsts`, which maps a "
+                   "task to the TICK IT WAS FIRST SOLVED AT. The count of solves is "
+                   "nowhere in it - `{'not': 83954}` means first solved at tick 83,954, "
+                   "not solved 83,954 times. The number of distinct tasks is "
+                   "`len(tasks)`, which is what the fleet page renders.\n")
 
     for label, tree_name, branch, head, dirty, u, p, changed in details:
         out.append(f"\n## Colony {label}\n")
