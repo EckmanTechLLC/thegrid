@@ -41,6 +41,8 @@ class Organism:
     bus_reads: int = 0
     signals_heard: int = 0
     signal_guided_moves: int = 0
+    observations: int = 0        # times this organism looked at a neighbour
+    observed_by: int = 0         # times a neighbour looked at it
     post_signal_harvested: float = 0.0
     structures_built: int = 0
     neighbor_reads: int = 0
@@ -373,6 +375,19 @@ class Organism:
                 victim.robbed = getattr(victim, "robbed", 0.0) + taken
                 colony.steals = getattr(colony, "steals", 0) + 1
                 colony.stolen = getattr(colony, "stolen", 0.0) + taken
+        elif op == Op.OBSERVE and "observe" in colony.features:
+            other = colony.neighbor(self)
+            if other is not None:
+                # Six scalars, masked to a byte like every other value in a
+                # register. The observer learns a number about a neighbour; it
+                # learns nothing about how that number was obtained.
+                fields = (int(max(0.0, other.energy)), other.age, other.generation,
+                          other.births, len(other.genome),
+                          sum(other.tasks_solved.values()))
+                self.a = fields[self.b % len(fields)] & 0xFF
+                self.observations = getattr(self, "observations", 0) + 1
+                colony.observations = getattr(colony, "observations", 0) + 1
+                other.observed_by = getattr(other, "observed_by", 0) + 1
         elif op == Op.CORRUPT and "predation" in colony.features:
             victim = colony.neighbor(self)
             if victim is not None and victim.genome:

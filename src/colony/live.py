@@ -657,6 +657,7 @@ class Habitat:
                                        for word in o.genome)),
             },
             "activeSignals": active_signals,
+"observations": getattr(colony, "observations", 0),
             "signalsHeard": sum(getattr(o, "signals_heard", 0) for o in colony.organisms),
             "signalGuidedMoves": sum(getattr(o, "signal_guided_moves", 0)
                                        for o in colony.organisms),

@@ -55,6 +55,7 @@ class Op(IntEnum):
     MACRO7 = 47
     STEAL = 48
     CORRUPT = 49
+    OBSERVE = 50
 
 
 @dataclass(frozen=True)
@@ -177,6 +178,12 @@ ISA = [
     # segment_duplication already produces, and which has had no reason to
     # persist until now.
     Instruction("corrupt", 0.90, "write A into an adjacent organism's genome at B"),
+    # Appended at 50 so every existing opcode keeps its number and its glyph,
+    # and a genome from any other colony still reads the same here.
+    Instruction("observe", 0.35,
+                "read one field of an adjacent organism's telemetry into A, "
+                "chosen by B: energy, age, generation, births, genome length, "
+                "tasks solved"),
 ]
 
 # Which opcodes each feature gates. organism.execute checks the feature before
@@ -189,6 +196,12 @@ FEATURE_OPS = {
     "macro": (Op.DEFINE, Op.MACRO0, Op.MACRO1, Op.MACRO2, Op.MACRO3,
               Op.MACRO4, Op.MACRO5, Op.MACRO6, Op.MACRO7),
     "predation": (Op.STEAL, Op.CORRUPT),
+    # Nothing in The Grid could see how anyone else was doing. An organism
+    # could read a neighbour's CODE with peek and copy it with copyn, but not
+    # whether that neighbour was actually prospering. This is the only
+    # instruction that reports on another organism's state rather than its
+    # contents.
+    "observe": (Op.OBSERVE,),
 }
 
 # Replication a migrant can perform alone. `call` and the macros reach code in
