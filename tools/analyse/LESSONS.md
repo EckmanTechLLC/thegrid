@@ -1,9 +1,19 @@
 # What works
 
 Toward a colony configured to survive and thrive. Only mechanisms that produced
-a measured effect. Drawn from the whole record — **799 epochs, 7,673,264
-distinct genomes, 8,820,379 parent-to-child transitions, 7,549,052 mutation
-origins** — not from a snapshot.
+a measured effect.
+
+Drawn from the live fossil records: **799 recorded epochs, 7,673,264 distinct
+genomes, 8,820,379 parent-to-child transitions, 7,549,052 mutation origins.**
+
+Two limits on that, stated up front. *Recorded* epochs are fewer than epochs
+run — Colony One is on epoch 1,276 but its fossil record begins at **1207**,
+because the record was only introduced on 2026-08-07; its first 1,206 epochs
+were never written anywhere. And 21 further snapshots sit under
+`~/.local/state/thegrid-interventions/` holding roughly 1.8M more genomes from
+colony two's early development and from named experiments. Findings below that
+are marked CONFIRMED hold within the data actually queried; none of them is a
+claim about every epoch this project has ever run.
 
 **CONFIRMED** — holds across the full record or four-plus independent colonies.
 **OBSERVED** — real and measured, but narrow or unstable. Don't design on these alone.
