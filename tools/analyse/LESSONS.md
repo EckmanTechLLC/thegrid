@@ -1,40 +1,65 @@
 # What works
 
 Toward a colony configured to survive and thrive. Only mechanisms that produced
-a measured effect. Drawn from the whole record — **799 epochs, 7,673,264
-distinct genomes, 8,820,379 parent-to-child transitions, 7,549,052 mutation
-origins** — not from a snapshot.
+a measured effect.
+
+Drawn from the live fossil records: **799 recorded epochs, 7,673,264 distinct
+genomes, 8,820,379 parent-to-child transitions, 7,549,052 mutation origins.**
+
+Plus the **archived early history**: 21 intervention snapshots under
+`~/.local/state/thegrid-interventions/`, of which only **5 are independent**
+(the rest are subsets of larger ones) — 530,579 distinct genomes from colony
+two's August development, including the runs where horizontal transfer was
+first introduced.
+
+Two limits on that, stated up front. *Recorded* epochs are fewer than epochs
+run — Colony One is on epoch 1,276 but its fossil record begins at **1207**,
+because the record was only introduced on 2026-08-07; its first 1,206 epochs
+were never written anywhere. And 21 further snapshots sit under
+`~/.local/state/thegrid-interventions/` holding roughly 1.8M more genomes from
+colony two's early development and from named experiments. Findings below that
+are marked CONFIRMED hold within the data actually queried; none of them is a
+claim about every epoch this project has ever run.
 
 **CONFIRMED** — holds across the full record or four-plus independent colonies.
 **OBSERVED** — real and measured, but narrow or unstable. Don't design on these alone.
 
 ---
 
-## 1. CONFIRMED — Horizontal acquisition is the only mechanism that beats break-even
+## 1. CONFIRMED — Horizontal acquisition pays, but only where vertical inheritance is expensive
 
-Across every mutation event the project has ever recorded, one mechanism
-produces genomes that out-reproduce their share. Every blind-variation
-mechanism is below 1.0.
+This is conditional, and the condition is the whole lesson. Split by economy:
 
 ```
-mechanism              new genomes    share    their births   share   ratio
-segment_transfer           847,537    11.2%       4,097,300   32.4%   2.89x
-single_deletion            471,007     6.2%         801,961    6.3%   1.02x
-block_deletion             189,803     2.5%         266,054    2.1%   0.84x
-point_substitution       4,100,412    54.3%       5,335,442   42.2%   0.78x
-segment_inversion          211,959     2.8%         267,211    2.1%   0.75x
-single_insertion           695,079     9.2%         803,039    6.4%   0.69x
-segment_duplication        365,253     4.8%         401,428    3.2%   0.66x
-random_burst               668,156     8.9%         668,956    5.3%   0.60x
+                          segment_transfer    of births    ratio
+eviction colonies              27.1%            56.5%      2.09x
+every other colony              2.7%             2.9%      1.08x
+August archive, when new        1.5%             1.4%      0.94x
 ```
 
-`segment_transfer` is `copyn` — lifting a contiguous working block out of a
-neighbour. It is 11% of what gets made and 32% of what goes on to breed.
-Point substitution, the workhorse at 54% of all new genomes, is **below**
-break-even.
+In an ordinary grazing economy, copying a neighbour is worth no more than any
+other mechanism — 1.08x, sitting among point substitution at 1.00x, deletion at
+1.26x, burst at 0.86x. Nothing has an edge.
 
-**Design rule:** copying a neighbour beats inventing. Make `peek`/`copyn` cheap
-and available; it is the highest-yield source of viable novelty in the system.
+Remove the cheap income and it inverts completely. In the no-grazing colonies
+every blind mechanism collapses below break-even and transfer is the only thing
+that works:
+
+```
+segment_transfer   2.09x      segment_duplication  0.46x
+single_deletion    0.90x      random_burst         0.38x
+point_substitution 0.64x      single_insertion     0.50x
+```
+
+The August archive is the control that makes this readable: when `copyn`
+segment transfer was first introduced, into a colony that still had grazing, it
+ran at **0.94x and did nothing for three weeks**. It is not the mechanism that
+is powerful — it is the mechanism plus an economy where inventing from scratch
+has stopped being affordable.
+
+**Design rule:** `peek` and `copyn` alone change nothing. Pair them with an
+economy that makes independent invention expensive, and acquisition becomes the
+dominant channel — more than half of all reproduction.
 
 ## 2. CONFIRMED — Seed from evolved genomes, never from ancestors
 
@@ -110,22 +135,16 @@ one colony duplicated its `publish` alongside it.
 **Design rule:** you do not require complexity, you make it the thing that
 earns. The duplication machinery already exists and points wherever income is.
 
-## 6. CONFIRMED — Remove the cheap income and inheritance turns sideways
+## 6. CONFIRMED — The takeover is progressive, not immediate
 
-With grazing gone, horizontal acquisition does not merely appear, it takes over
-— amplifying item 1 by a further 2x.
+Horizontal transfer in the no-grazing colonies climbed from 2.4% of new genomes
+to 27.9% over three days, with the enrichment ratio steady at 2.0–2.2x
+throughout. The advantage was there from the start; the volume took days to
+follow it.
 
-```
-                % of new genomes    % of the births they produced   enrichment
-eviction              27.9%                    58.2%                  2.09x
-bitrot                 5.6%                     6.4%                  1.15x
-netlist                1.1%                     1.4%                  1.24x
-control                1.7%                     1.6%                  0.96x
-```
-
-Stable for three consecutive days while the volume climbed from 2.4% to 27.9%.
-**More than half of all reproduction is now a copy of a neighbour's working
-block rather than of a parent.**
+Taken with the August archive above — three weeks at 0.94x under grazing — the
+mechanism needs both the right economy and time in it. Do not judge one of
+these from a single day.
 
 ## 7. CONFIRMED — Predation follows the currency
 
@@ -223,9 +242,9 @@ Every line is one of the confirmed items above, turned around.
    pressure with no newborn exemption. (4)
 2. **Peer it, and recolonise from living migrants.** Half the failure rate,
    thirty times the median epoch. Filter migrants for self-sufficiency. (2)
-3. **Make `peek` and `copyn` cheap.** Horizontal acquisition is the only
-   above-break-even source of viable novelty in seven and a half million
-   events. (1, 6)
+3. **Make `peek` and `copyn` cheap AND make invention expensive.** Either
+   alone does nothing — transfer sat at 0.94x for three weeks under grazing.
+   Together they carry more than half of all reproduction. (1, 6)
 4. **Make being useful to another organism the only way to reproduce**, and
    make inventing from scratch expensive. (5, 6)
 5. **Choose scarcity deliberately** — it decides whether they rob or sabotage. (7)
