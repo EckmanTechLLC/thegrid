@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/home/etl/odin/thegrid-colony7
-ExecStart=/home/etl/odin/thegrid-worktree/.venv/bin/python -m src.colony.live --host 0.0.0.0 --port 8793 --ticks-per-second 10 --mutator odin --name "Colony Seven" --features "bounty,burn,macro,predation" --peers "127.0.0.1:8787,127.0.0.1:8788,127.0.0.1:8789,127.0.0.1:8790,127.0.0.1:8791,127.0.0.1:8792" --state /home/etl/.local/state/thegrid-colony7/colony.pkl
+ExecStart=/home/etl/odin/thegrid-worktree/.venv/bin/python -m src.colony.live --host 0.0.0.0 --port 8793 --ticks-per-second 10 --mutator odin --name "Colony Seven" --features "bounty,burn,macro,predation" --peers "127.0.0.1:8788,127.0.0.1:8790,127.0.0.1:8791" --state /home/etl/.local/state/thegrid-colony7/colony.pkl
 Restart=always
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1

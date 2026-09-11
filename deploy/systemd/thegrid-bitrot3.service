@@ -1,0 +1,25 @@
+[Unit]
+Description=The Grid replicate bitrot3 (bitrot group)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/etl/odin/thegrid-bitrot3
+ExecStart=/home/etl/odin/thegrid-worktree/.venv/bin/python -m src.colony.live --host 0.0.0.0 --port 8811 --ticks-per-second 10 --mutator random --name "bitrot-3" --features "bounty,predation,bitrot" --peers "127.0.0.1:8809,127.0.0.1:8810,127.0.0.1:8812" --state /home/etl/.local/state/thegrid-bitrot3/colony.pkl
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/etl/odin/thegrid-bitrot3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/etl/.local/state/thegrid-bitrot3
+MemoryMax=1536M
+MemoryHigh=1024M
+MemorySwapMax=0
+CPUQuota=100%
+CPUWeight=100
+
+[Install]
+WantedBy=default.target
