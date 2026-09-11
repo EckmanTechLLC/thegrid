@@ -129,6 +129,13 @@ class Colony:
     # gains a permanent edge over everything that never has been. Without that
     # this degrades to plain LRU, which selects for reproducing quickly rather
     # than for being worth keeping - and a treadmill is not a gradient.
+    # A newborn cannot starve in its first N ticks, and its energy floors at
+    # zero rather than running into debt it could never climb out of. Eight
+    # hand-designed specialists need time to get their specialty working before
+    # hunger decides the contest; without this the tournament was being settled
+    # in the first few hundred ticks by who happened to be born on a full tile.
+    STARVATION_GRACE = 300
+
     EVICTION_HIGH_WATER = 0.92   # fraction of memory_cap that triggers eviction
     EVICTION_GRACE = 400         # ticks a newborn is safe, so it can act first
     # A time-to-live on uselessness, and the part that actually does the work.
@@ -219,7 +226,7 @@ class Colony:
             if "eviction" in self.features:
                 # No hunger, no ageing. Death arrives only from _evict_unused.
                 cause = None
-            elif organism.energy <= 0:
+            elif organism.energy <= 0 and organism.age >= self.STARVATION_GRACE:
                 cause = "starvation"
             elif "lease" in self.features:
                 # No senescence here: the lease is the only clock.

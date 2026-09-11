@@ -130,7 +130,9 @@ class Organism:
             colony.experimental_ops[name] += 1
         self.energy -= ISA[op].cost * colony.world.instruction_cost_multiplier(
             op, self.x, self.y)
-        if self.energy < 0.0 and "eviction" in colony.features:
+        if self.energy < 0.0 and (
+                "eviction" in colony.features
+                or self.age < getattr(colony, "STARVATION_GRACE", 0)):
             # No debt. There is no negative memory and no negative CPU time -
             # you are broke, and broke is recoverable. Without this floor,
             # removing death-by-starvation left energy as a counter that only

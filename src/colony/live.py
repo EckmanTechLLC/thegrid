@@ -122,8 +122,14 @@ class Habitat:
                       # quietly shortchanged, so honour it.
                       founder_genomes=(founder_genomes
                                        or build_founder_palette()[:self.founders]),
+                      # Six of each, not two. Eight specialists at two copies
+                      # is a sixteen-organism inoculum against the usual
+                      # forty-six, and these founders are longer than the
+                      # ancestor so they replicate slower as well. It went
+                      # extinct twice on that footing before the contest could
+                      # start.
                       founder_copies=(1 if founder_genomes
-                                      else (2 if self.physical else 1)),
+                                      else (6 if self.physical else 1)),
                       features=self.features)
 
     def _recolonise(self) -> Colony | None:

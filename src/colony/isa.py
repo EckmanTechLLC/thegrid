@@ -234,7 +234,71 @@ def build_service_core() -> list[int]:
     return [Op.ALLOC, Op.COPY, Op.IFNOTDONE, Op.JMPB, Op.FORK, Op.SCAN, Op.MOVE]
 
 
-def build_founder_palette() -> list[list[int]]:
+def build_arena_palette() -> list[list[int]]:
+    """Eight hand-designed specialists, each the best we can write at one thing.
+
+    Deliberately breaks the house rule that founders get ingredients rather
+    than working arrangements. The question here is not whether evolution can
+    assemble a strategy - it is which strategy wins when all of them start
+    already assembled and have to fight.
+
+    Every founder carries the same six-instruction core, so the contest is
+    about the specialty and not about who can replicate. MOVE is in the core
+    on purpose: without it an organism is stuck wherever it was born, and half
+    these strategies need a neighbour, so leaving it out would decide the
+    tournament by birth placement rather than by strategy.
+
+    Specialties are duplicated, because tandem duplication of the earning
+    motif is the most universal thing in the record - every colony does it.
+    Seeding it pre-duplicated skips a discovery we already know happens.
+
+    One asymmetry worth stating rather than hiding. Under eviction only three
+    things mark an organism useful: solving a task, having its published
+    routine called, and BEING READ by a neighbour. The first two are things
+    you do; the third is something done to you. So the solver and the
+    librarian can earn on their own, and everyone else depends on somebody
+    reading them - which means the copier, by peeking at everything, is the
+    one that makes the rest of the colony fertile. That is not a flaw in the
+    contest, it is the contest.
+    """
+    # HARVEST is in the core and grazing is ON, and that is what makes the
+    # tournament a tournament. Measured first with grazing off: the solver took
+    # 100% of the colony by tick 1000 and held it, because under eviction only
+    # three things mark an organism useful - solving a task, having a routine
+    # called, and BEING READ by a neighbour - so six of these eight had no route
+    # to reproduce at all and the contest was over before it started.
+    #
+    # With a shared harvest base every specialist has the same income and the
+    # specialty is the differentiator. The usual objection to grazing does not
+    # apply here: a forager beats everything, but NONE OF THESE EIGHT IS A
+    # FORAGER - they all forage identically, so nobody can win on harvesting.
+    # This is the nine-instruction ancestor with SCAN dropped, and the order
+    # matters more than the contents. Harvest goes FIRST. Put it last and every
+    # founder starves: ifnotdone/jmpb cycle INSIDE the copy loop, so an
+    # organism goes round that loop once per word it copies and reaches the end
+    # of its genome only once per full replication - the 17-instruction solver
+    # ate roughly once every seventeen laps. Measured: six runs, six deaths by
+    # starvation between tick 656 and 2,680, and doubling the inoculum did not
+    # help. The ancestor puts harvest first for exactly this reason.
+    core = [Op.HARVEST, Op.HARVEST, Op.ALLOC, Op.COPY,
+            Op.IFNOTDONE, Op.JMPB, Op.FORK, Op.MOVE]
+    return [
+        core,                                                   # replicator: pure speed
+        [*core, *([Op.INPUT, Op.SWAP, Op.INPUT, Op.NAND, Op.OUTPUT] * 2)],  # solver
+        [*core, *([Op.STEAL] * 3)],                             # thief
+        [*core, *([Op.CORRUPT] * 3)],                           # saboteur
+        [*core, *([Op.PEEK, Op.COPYN] * 3)],                    # copier
+        [*core, *([Op.PUBLISH, Op.CALL] * 2)],                  # librarian
+        [*core, *([Op.SALVAGE] * 3)],                           # salvager
+        [*core, *([Op.POST, Op.FETCH] * 3)],                    # networker
+    ]
+
+
+ARENA_NAMES = ["replicator", "solver", "thief", "saboteur",
+               "copier", "librarian", "salvager", "networker"]
+
+
+def build_service_palette() -> list[list[int]]:
     """Founders for a colony with no grazing.
 
     Same house style as the grazing palette: ingredients appended next to a
@@ -369,3 +433,8 @@ def isa_version() -> str:
     body = _j.dumps([[op["name"], op["cost"]] for op in table["opcodes"]],
                     separators=(",", ":"))
     return _h.sha256(f"{table['encoding']}|{body}".encode()).hexdigest()[:12]
+
+
+def build_founder_palette() -> list[list[int]]:
+    """This colony is the arena: hand-designed specialists, one of each."""
+    return build_arena_palette()

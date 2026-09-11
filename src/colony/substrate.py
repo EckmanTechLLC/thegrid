@@ -197,6 +197,33 @@ class SubstrateWorld(World):
     # no floor: if nothing finds another income, the colony starves.
     subsidy_ticks = 500_000        # ticks from full pasture to none
 
+    # -- the founding boom ---------------------------------------------------
+    # The oldest colonies exploded across the map in the first few thousand
+    # ticks, because the tiles were dense and refilled fast, and only afterwards
+    # did anything have to compete. Everything added since - spare-CPU coupling,
+    # the withdrawal, biome rates - made the opening lean instead, and a lean
+    # opening decides a contest by who was born on a good tile rather than by
+    # what they are good at. This arena went extinct twice before the
+    # specialists could even get started.
+    #
+    # So: abundance while the colony establishes, tapering to nothing. Not an
+    # exemption from any rule - just a rich world at the start, which is what
+    # the early ones actually had. Everyone gets large and then the ground goes
+    # ordinary underneath them and they have at it.
+    boom_ticks = 30_000            # how long the founding abundance lasts
+    boom_multiplier = 8.0          # regeneration multiplier at tick 0
+
+    @property
+    def founding_boom(self) -> float:
+        start = getattr(self, "subsidy_start_tick", None) or 0
+        elapsed = max(0, self.tick - start)
+        if elapsed >= self.boom_ticks:
+            return 1.0
+        # Linear taper. A cliff would kill everything the boom just built; a
+        # gradient lets the population re-specialise on the way down, which is
+        # what the withdrawal already taught us.
+        return 1.0 + (self.boom_multiplier - 1.0) * (1.0 - elapsed / self.boom_ticks)
+
     @property
     def grazing_subsidy(self) -> float:
         start = getattr(self, "subsidy_start_tick", None)
@@ -432,7 +459,7 @@ class SubstrateWorld(World):
         self.apply_resource_storm()
         # Income is Odin's spare capacity. No floor: a busy enough box is a
         # famine, and a long enough famine is an extinction.
-        regen = self.regen_multiplier * self.grazing_subsidy
+        regen = self.regen_multiplier * self.grazing_subsidy * self.founding_boom
         for y, row in enumerate(self.energy):
             for x in range(c.width):
                 if row[x] < c.tile_capacity:
