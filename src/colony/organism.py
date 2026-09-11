@@ -433,6 +433,33 @@ class Organism:
                 if self.call_slot < 0:
                     self.call_slot = self.a % len(colony.world.code_slots)
                     self.call_energy = self.energy
+                    if "service" in colony.features:
+                        # Billed per call, not on the caller's gain. The
+                        # gain-based royalty cannot work where there is no
+                        # harvest: running a routine produces no gain, so the
+                        # cut is always zero and the author is never marked
+                        # useful. Measured - colony four ran for days at
+                        # royalties 0.0 with publishes being refused 3,704
+                        # times, so the supply side was working and the demand
+                        # side could not pay.
+                        #
+                        # Here the CALL ITSELF is the payment. Being called is
+                        # what marks an author useful, which is what buys the
+                        # right to reproduce and the right not to be evicted.
+                        # Energy still moves, as a transfer and never a mint,
+                        # but the stamp is the part that matters.
+                        owner_id = colony.world.slot_owner[self.call_slot]
+                        if owner_id >= 0 and owner_id != self.id:
+                            owner = colony.organism_by_id(owner_id)
+                            if owner is not None:
+                                fee = min(colony.CALL_FEE, max(0.0, self.energy))
+                                self.energy -= fee
+                                owner.energy += fee
+                                owner.royalties = getattr(owner, "royalties", 0.0) + fee
+                                colony.royalties = getattr(colony, "royalties", 0.0) + fee
+                                colony.royalty_events = getattr(
+                                    colony, "royalty_events", 0) + 1
+                                owner.last_useful_tick = colony.world.tick
                 self.pending.extend(routine)
                 self.calls = getattr(self, "calls", 0) + 1
                 colony.calls = getattr(colony, "calls", 0) + 1
@@ -449,7 +476,7 @@ class Organism:
         # code earns its author nothing, and you cannot farm your own routine.
         if from_routine and not self.pending and self.call_slot >= 0:
             gain = self.energy - self.call_energy
-            if gain > 0:
+            if gain > 0 and "service" not in colony.features:
                 owner_id = colony.world.slot_owner[self.call_slot]
                 if owner_id >= 0 and owner_id != self.id:
                     owner = colony.organism_by_id(owner_id)

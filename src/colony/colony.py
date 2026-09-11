@@ -145,6 +145,10 @@ class Colony:
     # reproduce, which is what stops one early success breeding forever
     # on the strength of it.
     REPRODUCTION_WINDOW = 500
+    # What one call to a published routine costs the caller, paid straight to
+    # the author. A transfer, never minted. Small on purpose: the fee is not
+    # the incentive, the usefulness stamp it carries is.
+    CALL_FEE = 1.0
 
     def _evict_unused(self) -> None:
         """Reclaim the least recently useful. Two triggers, different rules."""
