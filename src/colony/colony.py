@@ -123,8 +123,24 @@ class Colony:
     # on this box is ~0.13 C, giving ~1.3e-4: roughly a one-in-four chance
     # that an organism living a full 2400 ticks takes a single flip. A real
     # thermal excursion of a couple of degrees makes it near-certain.
-    BITROT_PER_DEGREE = 0.001
-    BITROT_CEILING = 0.01      # even a very hot box cannot shred a genome
+    # Cranked hard, then capped, because the multiplier was never the problem.
+    # Measured on four runs: a rate of 0.0065 per organism per tick survives
+    # 20,000 ticks and takes 23,000 flips doing it; a rate of 0.02 is lethal in
+    # 1,100 to 4,000 ticks. Damage compounds over a lifetime, so the window
+    # between "no effect" and "certain death" is narrow.
+    #
+    # 0.05 per degree reaches the survivable rate at the box's typical 0.13C
+    # excess, and the ceiling sits just above it. Heat still drives the damage
+    # and a hot hour is genuinely worse, but no excursion guarantees
+    # extinction - a colony that dies whenever Odin gets busy never lives long
+    # enough to evolve the redundancy this exists to test for. At 0.001 the rate was ~1.3e-4 per
+    # organism per tick - roughly a one-in-four chance of a single flip across a
+    # full 2400-tick life - which is a realistic fault rate and far too gentle
+    # to select for anything. Here damage is a fact of life rather than an
+    # occasional event, and carrying one copy of the machinery that matters is
+    # a bad bet. If redundancy is ever going to be worth its cost, it is here.
+    BITROT_PER_DEGREE = 0.05
+    BITROT_CEILING = 0.008     # just above the measured survivable rate
     BITROT_BITS = 6            # opcodes occupy 0-49; 6 bits keeps flips in range
     # Class-level, because a running colony is restored from a pickle and an
     # existing checkpoint has neither of these in its instance dict.
