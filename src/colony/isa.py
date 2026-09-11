@@ -318,6 +318,21 @@ def disassemble(genome: list[int], annotate: bool = True) -> str:
     return "\n".join(lines)
 
 
+def isa_table() -> dict:
+    """The table isa_version() hashes, in the form a third party recomputes it from.
+
+    Served at /api/genomes/isa so a record can be checked without a checkout:
+    the version is a hash over exactly this, nothing else.
+    """
+    try:
+        from .isa import unpack  # noqa: F401
+        encoding = "packed-op-src-dst"
+    except ImportError:
+        encoding = "tape"
+    return {"encoding": encoding,
+            "opcodes": [{"name": item.name, "cost": item.cost} for item in ISA]}
+
+
 def isa_version() -> str:
     """Identity of THIS colony's instruction table.
 
@@ -332,10 +347,7 @@ def isa_version() -> str:
     holding a sequence can recompute this and check it matches the record.
     """
     import hashlib as _h, json as _j
-    body = _j.dumps([[item.name, item.cost] for item in ISA], separators=(",", ":"))
-    try:
-        from .isa import unpack  # noqa: F401
-        encoding = "packed-op-src-dst"
-    except ImportError:
-        encoding = "tape"
-    return _h.sha256(f"{encoding}|{body}".encode()).hexdigest()[:12]
+    table = isa_table()
+    body = _j.dumps([[op["name"], op["cost"]] for op in table["opcodes"]],
+                    separators=(",", ":"))
+    return _h.sha256(f"{table['encoding']}|{body}".encode()).hexdigest()[:12]

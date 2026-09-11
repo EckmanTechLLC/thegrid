@@ -8,8 +8,26 @@ import threading
 import time
 from pathlib import Path
 
-from .isa import ISA
+from .isa import ISA, isa_version
 from .record import encode_genome
+
+
+def _opcode_name(word: int) -> str:
+    """Name of the opcode in a genome word, packed or not.
+
+    A packed word carries (op, src, dst) and reaches 4095, so indexing ISA with
+    the whole word is out of range and was writing "?71" into the source
+    column. 100,985 of colony eight's 506,872 genome rows are stored that way -
+    20% - and a query in this file matches on that text (`source LIKE
+    '%signal%'`), so it was reading wrong too. Unpack first where the ISA
+    packs; the tape colonies are unaffected.
+    """
+    try:
+        from .isa import unpack
+        word = unpack(word)[0]
+    except ImportError:
+        pass
+    return ISA[word].name if 0 <= word < len(ISA) else f"?{word}"
 
 
 def genome_id(genome: list[int]) -> str:
@@ -25,10 +43,19 @@ class LineageHistory:
     """Aggregate ancestry without retaining an unbounded row per organism."""
 
     ECOLOGY_BUCKET_TICKS = 500
+    EXPORT_PAGE = 100
+    EXPORT_PAGE_MAX = 500
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, features=(), mutator: str | None = None):
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
+        # Stamped onto each genome at first sighting. Features and the mutator
+        # are unit-file flags and the ISA is whatever tree is checked out, so
+        # none of them is a property of the fossil record - and all three
+        # changed this September. A row that says which table its glyphs mean
+        # something against, and which opcodes could act when it was born, is
+        # checkable later; a join against the running process is a guess.
+        self.provenance = (isa_version(), ",".join(sorted(features)), mutator)
         self._lock = threading.Lock()
         self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
@@ -152,6 +179,16 @@ class LineageHistory:
                 self._db.execute(
                     f"ALTER TABLE ecology_buckets ADD COLUMN {_name} REAL NOT NULL DEFAULT 0")
 
+        genome_columns = {row[1] for row in self._db.execute("PRAGMA table_info(genomes)")}
+        for _name in ("isa_version", "features", "mutator"):
+            if _name not in genome_columns:
+                self._db.execute(f"ALTER TABLE genomes ADD COLUMN {_name} TEXT")
+        # Rows from before these columns existed stay NULL: "not recorded" is
+        # an answer, backfilling from today's flags would be a claim.
+        self._db.execute("""
+            CREATE INDEX IF NOT EXISTS genomes_export
+                ON genomes(first_epoch, first_tick, genome_id)
+        """)
         columns = {row[1] for row in self._db.execute("PRAGMA table_info(genome_stats)")}
         if "first_generation" not in columns:
             self._db.execute("ALTER TABLE genome_stats ADD COLUMN first_generation INTEGER")
@@ -257,13 +294,13 @@ class LineageHistory:
                         parent_genome: list[int] | None, generation: int) -> str:
         identity = genome_id(genome)
         parent_id = genome_id(parent_genome) if parent_genome is not None else None
-        source = " · ".join(ISA[word].name if 0 <= word < len(ISA) else f"?{word}"
-                            for word in genome)
+        source = " · ".join(_opcode_name(word) for word in genome)
         self._db.execute("""
             INSERT OR IGNORE INTO genomes(genome_id,encoded,source,first_epoch,first_tick,
-                                          parent_genome_id)
-            VALUES(?,?,?,?,?,?)
-        """, (identity, encode_genome(genome), source, epoch, tick, parent_id))
+                                          parent_genome_id,isa_version,features,mutator)
+            VALUES(?,?,?,?,?,?,?,?,?)
+        """, (identity, encode_genome(genome), source, epoch, tick, parent_id,
+              *self.provenance))
         self._db.execute("""
             INSERT INTO genome_stats(epoch,genome_id,first_generation,max_generation,first_tick,last_tick)
             VALUES(?,?,?,?,?,?)
@@ -482,6 +519,81 @@ class LineageHistory:
             "mutationMechanisms": [dict(row) for row in mechanism_rows],
             "communicationLineages": [dict(row) for row in communication_rows],
             "epochs": [dict(row) for row in epochs],
+        }
+
+    def genome_record(self, identity: str) -> dict | None:
+        """One genome at its stable id, or None. Never ranks; see _export."""
+        with self._lock:
+            self._db.commit()
+            row = self._db.execute(
+                "SELECT * FROM genomes WHERE genome_id=?", (identity,)).fetchone()
+            return self._export(row) if row is not None else None
+
+    def genome_records(self, since_epoch: int = 0, after: str | None = None,
+                       limit: int = EXPORT_PAGE) -> tuple[list[dict], str | None]:
+        """A page of genomes in first-sighting order, oldest first.
+
+        `after` is the cursor returned with the previous page - the last row's
+        (first_epoch, first_tick, genome_id) - so a reader can walk the whole
+        record forward without offsets drifting as new genomes are appended.
+        """
+        limit = max(1, min(self.EXPORT_PAGE_MAX, int(limit)))
+        epoch, tick, identity = -1, -1, ""
+        if after:
+            parts = after.split(":")
+            if len(parts) != 3:
+                raise ValueError("cursor is epoch:tick:genome_id")
+            epoch, tick, identity = int(parts[0]), int(parts[1]), parts[2]
+        with self._lock:
+            self._db.commit()
+            rows = self._db.execute("""
+                SELECT * FROM genomes
+                WHERE first_epoch >= ?
+                  AND (first_epoch, first_tick, genome_id) > (?, ?, ?)
+                ORDER BY first_epoch, first_tick, genome_id LIMIT ?
+            """, (int(since_epoch), epoch, tick, identity, limit)).fetchall()
+            records = [self._export(row) for row in rows]
+        cursor = None
+        if len(records) == limit:
+            last = records[-1]
+            cursor = f"{last['first_epoch']}:{last['first_tick']}:{last['genome_id']}"
+        return records, cursor
+
+    def _export(self, row) -> dict:
+        """The published shape of one genome. Facts only, no field a reader
+        could mistake for a verdict: no births, no ages, no tiers. What
+        selection did with a sequence is downstream's rule to apply, not ours
+        to summarise - see EckmanTechLLC/thegrid#5."""
+        record = dict(row)
+        generation = self._db.execute(
+            "SELECT first_generation FROM genome_stats WHERE epoch=? AND genome_id=?",
+            (record["first_epoch"], record["genome_id"])).fetchone()
+        # The mechanisms on the FIRST birth of this sequence here, not every
+        # birth that later re-derived it by some other route.
+        mechanisms = [r[0] for r in self._db.execute("""
+            SELECT mutation_type FROM mutation_origins
+            WHERE epoch=? AND child_genome_id=? AND first_tick=?
+            ORDER BY mutation_type
+        """, (record["first_epoch"], record["genome_id"], record["first_tick"]))]
+        features = record.get("features")
+        mutator = record.get("mutator")
+        return {
+            "genome_id": record["genome_id"],
+            "encoded": record["encoded"],
+            "instructions": record["source"].split(" · "),
+            "first_epoch": record["first_epoch"],
+            "first_tick": record["first_tick"],
+            "first_generation": generation[0] if generation else None,
+            "parent_genome_id": record["parent_genome_id"],
+            "mechanisms": mechanisms,
+            # Proposed by a model and kept by selection, or blind. Unknown for
+            # rows older than the mutator column: the tag did not exist yet.
+            "model_proposed": (None if mutator is None
+                               else "model_proposal" in mechanisms),
+            "isa_version": record.get("isa_version"),
+            "features": (None if features is None
+                         else [f for f in features.split(",") if f]),
+            "mutator": mutator,
         }
 
     def close(self) -> None:

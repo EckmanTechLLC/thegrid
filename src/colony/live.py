@@ -8,6 +8,7 @@ import ctypes
 import gc
 import json
 import os
+import socket
 import sys
 import traceback
 import pickle
@@ -23,7 +24,7 @@ from aiohttp import web
 
 from .colony import Colony
 from .history import LineageHistory, genome_id
-from .isa import (isa_version, ISA, NAME_TO_OP, Op, SELF_SUFFICIENT, build_ancestor,
+from .isa import (isa_version, isa_table, ISA, NAME_TO_OP, Op, SELF_SUFFICIENT, build_ancestor,
                   build_founder_palette, inert_ops, pack, unpack)
 from .odin_operator import OdinMutator
 from .record import ALPHABET, encode_energy, encode_genome, encode_positions
@@ -46,8 +47,13 @@ class Habitat:
     def __init__(self, state_path: Path, seed: int = 42, founders: int | None = None,
                  physical: bool = True, mutator_kind: str = "odin",
                  width: int = 48, height: int = 48, name: str | None = None,
-                 features: set | None = None, peers: list | None = None):
+                 features: set | None = None, peers: list | None = None,
+                 deployment: str | None = None):
         self.state_path = state_path
+        # Two operators run this code and publish under the same names, so a
+        # colony name alone does not say whose record a genome came from.
+        self.deployment = (deployment or os.environ.get("THEGRID_DEPLOYMENT")
+                           or socket.gethostname())
         # Derived, never a constant. It was 13 against a palette that had grown
         # to 21, so Colony.__init__ silently used genomes[0:13] and the last
         # eight founders never entered the world at all - including the only
@@ -545,6 +551,7 @@ class Habitat:
             # histogram computed against the wrong one is a wrong answer
             # that still looks like a number.
             "isaVersion": isa_version(),
+            "deployment": self.deployment,
             "ancestor": encode_genome(build_ancestor()),
             "tasks": colony.task_firsts,
             "name": self.name,
@@ -912,6 +919,44 @@ async def create_app(habitat: Habitat, ticks_per_second: int) -> web.Application
 
     app.router.add_get("/api/emigrants", emigrants)
 
+    def _export_envelope(**body) -> dict:
+        return {"colony": habitat.name, "deployment": habitat.deployment,
+                # What this process runs NOW. Each record carries what was
+                # recorded at its own first sighting; the two can differ.
+                "live": {"isaVersion": isa_version(),
+                         "features": sorted(habitat.features),
+                         "mutator": habitat.mutator_kind},
+                **body}
+
+    async def genome_record(request: web.Request) -> web.Response:
+        record = await asyncio.to_thread(habitat.history.genome_record,
+                                         request.match_info["genome_id"])
+        if record is None:
+            raise web.HTTPNotFound(text="no genome with that id in this record")
+        return web.json_response(_export_envelope(genome=record))
+
+    async def genome_records(request: web.Request) -> web.Response:
+        try:
+            since_epoch = int(request.query.get("since_epoch", "0"))
+            limit = int(request.query.get("limit", habitat.history.EXPORT_PAGE))
+            records, cursor = await asyncio.to_thread(
+                habitat.history.genome_records, since_epoch,
+                request.query.get("after"), limit)
+        except ValueError:
+            raise web.HTTPBadRequest(
+                text="since_epoch and limit are integers; after is a cursor "
+                     "from a previous page")
+        return web.json_response(
+            _export_envelope(sinceEpoch=since_epoch, genomes=records, next=cursor),
+            dumps=lambda x: json.dumps(x, separators=(",", ":")))
+
+    async def genome_isa(request: web.Request) -> web.Response:
+        return web.json_response({"isaVersion": isa_version(), **isa_table()})
+
+    app.router.add_get("/api/genomes", genome_records)
+    app.router.add_get("/api/genomes/isa", genome_isa)
+    app.router.add_get("/api/genomes/{genome_id:[0-9a-f]{16}}", genome_record)
+
     async def start(app: web.Application) -> None:
         app["runner"] = asyncio.create_task(run_habitat(habitat, ticks_per_second))
         def restart_on_failure(task: asyncio.Task) -> None:
@@ -948,6 +993,8 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--ticks-per-second", type=int, default=100)
     parser.add_argument("--mutator", choices=("odin", "random"), default="odin")
+    parser.add_argument("--deployment", default=None,
+                        help="name of this deployment in the published record")
     parser.add_argument("--heat", default=os.environ.get("THEGRID_HEAT", "k10temp"),
                         help="where machine heat is read from: k10temp (default, fails "
                              "closed if absent), host-cpu, or fixed:<celsius>")
