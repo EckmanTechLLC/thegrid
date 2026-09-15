@@ -23,16 +23,35 @@ UNITS = HOME / ".config/systemd/user"
 VENV = HOME / "odin/thegrid-worktree/.venv/bin/python"
 REFERENCE = "thegrid-colony2"
 
-COLONIES = [
-    ("One", "thegrid-colony.service", "thegrid-colony1", "thegrid"),
-    ("Two", "thegrid-colony2.service", "thegrid-colony2", "thegrid-colony2"),
-    ("Three", "thegrid-colony3.service", "thegrid-colony3", "thegrid-colony3"),
-    ("Four", "thegrid-colony4.service", "thegrid-colony4", "thegrid-colony4"),
-    ("Five", "thegrid-colony5.service", "thegrid-colony5", "thegrid-colony5"),
-    ("Six", "thegrid-colony6.service", "thegrid-colony6", "thegrid-colony6"),
-    ("Seven", "thegrid-colony7.service", "thegrid-colony7", "thegrid-colony7"),
-    ("Eight", "thegrid-colony8.service", "thegrid-colony8", "thegrid-colony8"),
-]
+def discover_colonies():
+    """Every colony with a loaded unit file, read from the unit.
+
+    This was a hardcoded list of eight. It documented three colonies that had
+    been retired and missed sixteen that were running - the whole eviction
+    group, both service colonies, observe, rot, the arena and the openhgt
+    controls - which is precisely the drift this guide exists to catch. The
+    fleet page was fixed the same way and this one was not.
+
+    Retired colonies keep their unit in retired/ and are deliberately not
+    picked up: their record is in RETIRED.md.
+    """
+    out = []
+    for unit in sorted(UNITS.glob("thegrid-*.service")):
+        text = unit.read_text()
+        line = next((l for l in text.splitlines() if l.startswith("ExecStart=")), "")
+        if "src.colony.live" not in line:
+            continue
+        tree = next((l.split("=", 1)[1] for l in text.splitlines()
+                     if l.startswith("WorkingDirectory=")), "")
+        state = (line.split("--state ")[1].split("/colony.pkl")[0].split("/")[-1]
+                 if "--state " in line else "")
+        label = (line.split('--name "')[1].split('"')[0]
+                 if '--name "' in line else unit.stem.replace("thegrid-", ""))
+        out.append((label, unit.name, Path(tree).name, state))
+    return out
+
+
+COLONIES = discover_colonies()
 
 # Run inside each tree, in its own interpreter, so a tree with a different
 # instruction set reports its own rather than a neighbour's.
