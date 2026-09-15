@@ -1,8 +1,29 @@
 import sqlite3
 from pathlib import Path
+
+def usable(path) -> bool:
+    """Skip a database that is not a colony record.
+
+    ~/.local/state/thegrid-interventions/history.sqlite3 is a zero-byte shell
+    left by something opening that path without writing. It matches the
+    thegrid*/history.sqlite3 glob, so every scan picks it up and then dies on
+    "no such table: epochs". The real intervention snapshots are in
+    subdirectories under it and are fine.
+    """
+    import sqlite3
+    try:
+        if path.stat().st_size == 0:
+            return False
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        n = con.execute(
+            "select count(*) from sqlite_master where type='table'").fetchone()[0]
+        con.close()
+        return n > 0
+    except Exception:
+        return False
 STATE = Path.home() / ".local/state"
 
-dbs = sorted(p for p in STATE.glob("thegrid*/history.sqlite3"))
+dbs = sorted(p for p in STATE.glob("thegrid*/history.sqlite3") if usable(p))
 print(f"scanning {len(dbs)} fossil records\n")
 
 # 1. cold starts: does seeding from evolved peers beat seeding from ancestors?
@@ -18,7 +39,7 @@ for u in units.glob("thegrid-*.service"):
 
 tot_p = fail_p = tot_a = fail_a = 0
 lens_p, lens_a = [], []
-for db in dbs:
+for db in [d for d in dbs if usable(d)]:
     name = db.parent.name
     if name not in peered: continue
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
@@ -37,7 +58,7 @@ print(f"   ancestral seed only    : {tot_a:>5} epochs, {fail_a:>4} died under 20
 
 # 2. how much of the whole record is there
 tot_epochs = tot_genomes = tot_trans = tot_mut = 0
-for db in dbs:
+for db in [d for d in dbs if usable(d)]:
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     for t, var in (("epochs","tot_epochs"),("genomes","tot_genomes"),
                    ("transitions","tot_trans"),("mutation_origins","tot_mut")):
@@ -53,7 +74,7 @@ print(f"   {tot_trans:,} parent-to-child transitions, {tot_mut:,} mutation origi
 
 # 3. which mutation mechanism produces genomes that REPRODUCE, fleet-wide
 agg = {}
-for db in dbs:
+for db in [d for d in dbs if usable(d)]:
     con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     try:
         for kind, n, b in con.execute("select mutation_type,count(*),sum(origin_births) from mutation_origins group by 1"):

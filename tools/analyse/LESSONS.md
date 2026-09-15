@@ -26,40 +26,64 @@ claim about every epoch this project has ever run.
 
 ---
 
-## 1. CONFIRMED — Horizontal acquisition pays, but only where vertical inheritance is expensive
+## 1. CONFIRMED — Horizontal acquisition pays, and it is the recombination
 
-This is conditional, and the condition is the whole lesson. Split by economy:
-
-```
-                          segment_transfer    of births    ratio
-eviction colonies              27.1%            56.5%      2.09x
-every other colony              2.7%             2.9%      1.08x
-August archive, when new        1.5%             1.4%      0.94x
-```
-
-In an ordinary grazing economy, copying a neighbour is worth no more than any
-other mechanism — 1.08x, sitting among point substitution at 1.00x, deletion at
-1.26x, burst at 0.86x. Nothing has an edge.
-
-Remove the cheap income and it inverts completely. In the no-grazing colonies
-every blind mechanism collapses below break-even and transfer is the only thing
-that works:
+Conditional on the economy, and now controlled for the obvious confound.
 
 ```
-segment_transfer   2.09x      segment_duplication  0.46x
+                                segment_transfer   of births   enrichment
+eviction, copyn needs a neighbour      31.6%         48.3%       1.53x
+openhgt, copyn from anywhere           23.6%         42.5%       1.80x
+an ordinary grazing colony              2.6%          2.4%       0.94x
+```
+
+Per colony, so no single outlier carries it:
+
+```
+eviction2  2.62x    colony4    2.01x    eviction1  2.01x    openhgt2  1.90x
+eviction4  1.76x    eviction3  1.22x    openhgt1   1.08x
+```
+
+**The honest figure is 1.1x to 2.6x across seven colonies, never below 1.0** -
+not the single 2.09x this file used to quote, which was a pooled number that
+moved as the colonies changed. In a grazing colony it is 0.94x, indistinguishable
+from point substitution at 1.00x, deletion at 1.26x, burst at 0.86x.
+
+### The control
+
+`copyn` normally requires an ADJACENT organism. That is a confound: a copier
+must stand in a crowd, a crowd is where `peek` happens, `peek` credits the
+organism being read, and that credit is what buys the right to reproduce under
+eviction. The enrichment could have been about position rather than about the
+code being copied. (`copyn` itself credits nobody - only `peek` does. That was
+worth reading rather than assuming.)
+
+So `openhgt` sources the segment from a random living organism anywhere on the
+map. Same operator, same segment lengths, same recording, adjacency gone. It
+**did not collapse** - it sits slightly higher than the group it controls for,
+and the comparison has been stable to two decimals across two days and millions
+of mutation origins.
+
+Genomes assembled from a transferred segment genuinely out-reproduce genomes
+assembled by point mutation. It is the recombination.
+
+### And the economy still has to make invention expensive
+
+The August archive is the other control. When `copyn` was first introduced into
+a colony that still had grazing, it ran at **0.94x and did nothing for three
+weeks**. Remove the cheap income and every blind mechanism collapses below
+break-even while transfer alone climbs:
+
+```
+segment_transfer   1.5-1.8x   segment_duplication  0.46x
 single_deletion    0.90x      random_burst         0.38x
 point_substitution 0.64x      single_insertion     0.50x
 ```
 
-The August archive is the control that makes this readable: when `copyn`
-segment transfer was first introduced, into a colony that still had grazing, it
-ran at **0.94x and did nothing for three weeks**. It is not the mechanism that
-is powerful — it is the mechanism plus an economy where inventing from scratch
-has stopped being affordable.
-
-**Design rule:** `peek` and `copyn` alone change nothing. Pair them with an
-economy that makes independent invention expensive, and acquisition becomes the
-dominant channel — more than half of all reproduction.
+**Design rule:** `peek` and `copyn` alone change nothing - that is measured, not
+assumed. Pair them with an economy where inventing from scratch has stopped
+being affordable, and acquisition becomes the dominant channel, carrying close
+to half of all reproduction.
 
 ## 2. CONFIRMED — Seed from evolved genomes, never from ancestors
 
