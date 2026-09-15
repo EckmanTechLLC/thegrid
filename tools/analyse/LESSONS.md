@@ -91,11 +91,14 @@ The single largest survival lever measured.
 
 ```
                           epochs   died <2k ticks   median epoch length
-recolonises from peers       558      105 (18.8%)           126,773
-ancestral seed only          217       82 (37.8%)             4,212
+recolonises from peers       399       64 (16.0%)            79,951
+ancestral seed only          208       72 (34.6%)            13,092
 ```
 
-Half the failure rate and a **30x longer median epoch**. A fresh ancestral
+Half the failure rate and a **six times longer median epoch**. (An earlier
+version said thirty times, from a scan that was silently skipping the retired
+colonies' records — their ancestral epochs pull the median up from 4,212 to
+13,092. The direction is unchanged and the sample is larger.) A fresh ancestral
 palette has to rediscover a working replicator against the clock; a migrant
 arrives already viable.
 
@@ -133,9 +136,16 @@ bitrot              78            74             ~340
 netlist             70            66              549
 ```
 
-Zero extinctions in 48 hours across five colonies while the rest of the fleet
-burned 159 epochs. Generation **7,224** against a previous project best in the
-hundreds. Combined with item 3, this is the direct route to depth.
+Zero extinctions across eight colonies now — the eviction group, both openhgt
+controls, both service colonies and colony four — still on epoch 1 at tick 4.8
+million after five days. **Generation 27,283** against a previous project best
+in the hundreds.
+
+**Do not read the immortality itself as a finding.** Starvation ended every
+epoch in this project, and this removes starvation, so "eviction colonies do not
+go extinct" is designed rather than discovered. What is a finding is item 3:
+depth scales with epoch length, and these are the only colonies that run long
+enough to reach it. The immortality is the instrument, not the result.
 
 **Design rule:** existence free, reclamation the only death. A program does not
 get hungry; it runs until something needs the room. Memory-pressure eviction
