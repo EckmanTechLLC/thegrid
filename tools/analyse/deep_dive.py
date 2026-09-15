@@ -12,6 +12,27 @@ import json, sqlite3, sys, urllib.request
 from collections import Counter, defaultdict
 from pathlib import Path
 
+
+def usable(path) -> bool:
+    """Skip a database that is not a colony record.
+
+    ~/.local/state/thegrid-interventions/history.sqlite3 is a zero-byte shell
+    left by something opening that path without writing. It matches the
+    thegrid*/history.sqlite3 glob, so every scan picks it up and then dies on
+    "no such table: epochs". The real intervention snapshots are in
+    subdirectories under it and are fine.
+    """
+    import sqlite3
+    try:
+        if path.stat().st_size == 0:
+            return False
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        n = con.execute(
+            "select count(*) from sqlite_master where type='table'").fetchone()[0]
+        con.close()
+        return n > 0
+    except Exception:
+        return False
 STATE = Path.home() / ".local/state"
 TREE = Path.home() / "odin/thegrid-colony2"
 sys.path.insert(0, str(TREE))
