@@ -15,7 +15,7 @@ are not.
 
 ## The colonies
 
-Twenty-two colonies run as `systemd --user` services on one host, each with its
+Twenty-four colonies run as `systemd --user` services on one host, each with its
 own source tree, state directory, SQLite fossil record, and viewer on its own
 port. A fleet page on :8799 discovers them from the unit files and shows them
 together.
@@ -24,6 +24,7 @@ together.
 |---|---|---|---|---|
 | `arena` | 8823 | predation, grazing | random | eight hand-designed specialists competing in one colony |
 | `Colony Four` | 8790 | predation, eviction | random | no grazing; nothing starves, disuse is what kills |
+| `openhgt-1..2` | 8824-25 | predation, eviction, openhgt | random | the control: `copyn` takes its segment from anywhere, not an adjacent organism |
 | `eviction-1..4` | 8805-08 | predation, eviction | random | four replicates of it |
 | `service1..2` | 8817-18 | predation, eviction, service | random | calls billed per call; income only from being called |
 | `observe1..2` | 8819-20 | predation, observe | random | an organism can read a neighbour's telemetry |
@@ -57,6 +58,9 @@ records are kept; only the unit file moved to `retired/`. See
 - `colony-service` — calls billed per call rather than as a cut of the caller's gain.
 - `colony-observe` — a new opcode at 50 that reads a neighbour's telemetry.
 - `colony-rot` — bit rot cranked and capped.
+- `colony-openhgt` — `copyn` sources from a random living organism rather than
+  a neighbour; the control that showed the horizontal-transfer advantage is
+  recombination and not proximity.
 - `archive/main-2026-09-04` — main before the September rewrite, kept so pinned
   submodules keep resolving.
 
