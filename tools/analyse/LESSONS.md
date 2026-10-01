@@ -152,6 +152,10 @@ get hungry; it runs until something needs the room. Memory-pressure eviction
 must **not** exempt newborns, or births outrun reclamation and the population
 runs away.
 
+**But eviction has an end state.** Run long enough, every eviction world so
+far converges to immortal sterile stasis — see 11. The instrument works; it
+also finishes.
+
 ## 5. CONFIRMED — Populations duplicate whatever pays, so choose what pays
 
 Tandem duplication of the earning motif happens in every colony. Only the
@@ -246,6 +250,58 @@ re-adapts.
 
 ---
 
+## 11. CONFIRMED — Eviction's end state is immortal stasis: maximum survivability, zero evolvability
+
+Seven of the nine eviction-rule colonies have stopped evolving entirely — not
+extinct, the opposite. Zero births and zero deaths while ticks keep advancing:
+
+```
+            froze at tick   seen at    frozen for   population
+service1          ~101k      13.1M        ~99%           261
+eviction-2        ~473k      14.7M        ~97%           391
+service2          ~533k      13.1M        ~96%           338
+colony4           ~659k      14.8M        ~96%           180
+eviction-4        ~2.3M      14.7M        ~84%           271
+eviction-3        ~3.6M      14.6M        ~75%         1,161
+openhgt1          ~8.8M      12.3M        ~29%           154
+```
+
+Freeze point = the last ecology bucket where population_min differs from
+population_max; the live death counters are bit-identical across polls taken
+days apart, and the first six have not moved since at least 2026-09-21.
+
+Mechanism, read from the code and confirmed on live organisms: the only death
+is the disuse sweep (idle ≥ 3000 ticks), and solving any task stamps
+`last_useful_tick`. The frozen populations run tight input→nand→output loops
+that solve `nand` every ~7 ticks — one sampled organism was 6.66M ticks old
+with 952,008 solves — so the sweep never fires. None carries a working FORK
+path, so births are zero. Energy is 0.0 and irrelevant; memory sits at 3-6%,
+so nothing is resource-blocked. The ratchet: a mutant that drops replication
+loses nothing (it is already immortal if it keeps solving), while a replicator
+spends ticks copying instead of solving, ranks worse on least-recently-useful,
+and is culled during churn. When the last replicator goes, the population
+freezes. Generation counters date every frozen organism to the freeze point.
+
+This is the designed rule obeyed to its fixed point, not a bug: the working
+set converged. Entries that keep getting hits stay resident forever, and
+nothing new is ever admitted. By the only currency these worlds enforce —
+stay useful or lose your pages — the frozen populations won outright. What
+they bought with it is total brittleness: if the farmed task stopped paying
+usefulness, every organism would hit the TTL together with no next generation
+behind it (untested; it would need an authorised intervention).
+
+openhgt1 falling (≈2026-09-25) matters most: open horizontal transfer was the
+control group, its genomes were the fleet's most complex (median 16), and its
+stasis is the deepest — zero peeks, calls, or bus writes. Still evolving:
+eviction-1 and openhgt2 only, both pinned at the cgroup RSS ceiling, paying
+~15 deaths per tick for the adaptability the other seven gave up.
+
+**Design rule:** any survival condition that can be satisfied in place,
+forever, without reproducing, will eventually be held by organisms that do
+exactly that. If evolution is meant to continue, staying alive must not be
+achievable by standing still — death, or the credit that postpones it, has to
+decay unless renewed by something reproduction alone can buy.
+
 ## Observed, worth building on, not yet proven
 
 - **Explicit operands may be what makes a call graph possible.** The packed
@@ -256,12 +312,24 @@ re-adapts.
   six of seven tasks and carry the fleet's highest complexity. Redundancy is
   what an unreliable substrate should select for, but they also run bounty and
   predation, so the cause is not isolated.
-- **Model-authored mutation works given room to answer**, but is statistically
-  negligible so far: 21 `model_proposal` events in 7.5M. A hybrid-reasoning
-  model needs budget for the reasoning *and* the answer, or it returns nothing.
+- **Model-authored mutation works given room to answer, and still does not
+  establish.** The odin operator pipeline was re-pointed 2026-09-21 after ~10
+  days of answering a dead queue from a stale worktree; proposals have been
+  accepted every half hour since. But 4,554 `model_proposal` genomes produced
+  4,554 births — every designed variant is born exactly once and founds
+  nothing, while segment_transfer compounds at 1.3x in the same colony. A
+  hybrid-reasoning model still needs budget for the reasoning *and* the
+  answer, or it returns nothing.
 - **Withdraw an income slowly rather than cutting it.** Draining the tile at
   full rate while paying a shrinking fraction gives a gradient instead of a
   cliff, and the population re-specialises as it falls.
+- **A pause perturbs a running equilibrium.** eviction-1 held pop ~170 for 5M
+  ticks, sat stopped for three days with the rest of the fleet (09-18 to
+  09-21), and within ~80k ticks of resuming flipped into boom-bust swings
+  (165↔6,600) that damped over ~2M ticks into a new equilibrium near 2,600 —
+  fifteen times the old level, at the cgroup memory ceiling. Genome length
+  ~19 throughout, so the design did not change; the dynamics did. Cause not
+  isolated; the restart is the only event on that clock.
 - **Reward the intermediate steps.** Lenski 2003 evolved EQU only in runs where
   simpler logic functions also paid; never where EQU alone was rewarded. Our
   one unreachable task, `forecast`, is the one with no partial credit.
@@ -273,7 +341,8 @@ re-adapts.
 Every line is one of the confirmed items above, turned around.
 
 1. **No starvation, no senescence.** Eviction only — on disuse, and on memory
-   pressure with no newborn exemption. (4)
+   pressure with no newborn exemption. (4) Plan the stasis breaker up front,
+   or the colony will finish instead of thrive. (11)
 2. **Peer it, and recolonise from living migrants.** Half the failure rate,
    thirty times the median epoch. Filter migrants for self-sufficiency. (2)
 3. **Make `peek` and `copyn` cheap AND make invention expensive.** Either
