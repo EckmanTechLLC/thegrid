@@ -302,6 +302,63 @@ exactly that. If evolution is meant to continue, staying alive must not be
 achievable by standing still — death, or the credit that postpones it, has to
 decay unless renewed by something reproduction alone can buy.
 
+---
+
+## 12. CONFIRMED — The class universe runs one arc, five times: every economy decays into recycling
+
+Five colonies with heritable program classes (wizard/cleaner/predator/hog,
+plus builder in the fifth) ran 2026-10-01 to 10-08 under identical physics —
+metabolic cost tables per class, one usefulness channel per class, a
+sterile-credit cap (300 credits with no fork and your credits stop landing),
+and a per-class memory floor of 12. Same arc, all five, different speeds:
+
+```
+wizard pioneers        5/5  the only niche that works in an empty world
+boom -> corpse economy 5/5  pioneer deaths build the scrap base
+cleaner era            5/5  detritivores take the majority
+drain discovered       5/5  opcode 50, in no founder genome, found by
+                            lottery within hours in every world
+predator revolution    5/5  drain fork alloc copy - a 4-instruction
+                            monoculture; complexity median crashed to 1
+reform (intervention)  —    drain credit restricted to cross-class victims
+predator collapse      5/5  rackets starved; one world first built a 4,400-
+                            predator ranch milking 900 cleaners, which
+                            overgrazed and fell inside two days
+CLEANER REPUBLIC       5/5  terminal state: 1,200-2,400 recyclers living on
+                            their own dead, every other class pinned to its
+                            floor of 12, generations 107k-155k and churning
+```
+
+Honest scope: this is a replicated trajectory UNDER identical mid-run
+interventions (the cross-class reform was applied to all five at once when
+the drain racket proved to be an endpoint, 11.). It is not five untouched
+runs; it is five copies of the same history, which is still a law of this
+rule set: wherever this design lands, it lands in the janitor state.
+
+What held and what did not:
+- **The sterile-credit cap worked.** The dominant wizard-era genome carried
+  task circuit AND replication in one loop - the stasis play of 11 never
+  reappeared. Anti-stasis by making immortality rent-bearing: validated.
+- **Class floors worked.** No class ever went extinct in any world; every
+  revolution left minorities alive to reseed the next era. MemoryLow for
+  species: validated.
+- **A learnable attack on the survival currency restructures society within
+  hours of discovery** - five independent discoveries of opcode 50, five
+  revolutions. Capability-without-instruction is the strongest lever this
+  project has found.
+- **Introspection was a null.** A sense op (read your own hunger) executed
+  millions of times in every world and never produced a restraint advantage.
+  Knowing you are full does not matter while attack is the cheapest credit.
+- **A predator majority is never stable.** The within-class racket was a
+  perpetual-motion bug; the cross-class ranch was real ecology but overgrazed
+  at 5:1 predator:prey. Both died. Rare predators (the floors) persisted.
+
+**Design rule:** a closed economy whose only demand is internal converges -
+here, onto the recycling of its own churn. The escape is demand the
+population cannot farm to equilibrium: external, physical, or adversarial.
+(That is the Grid 2 premise: income only from verified real work and real
+actuation.)
+
 ## Observed, worth building on, not yet proven
 
 - **Explicit operands may be what makes a call graph possible.** The packed
