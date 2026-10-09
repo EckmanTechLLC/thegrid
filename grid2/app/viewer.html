@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Grid 2 — the real-work world</title>
+<style>
+:root{color-scheme:dark;font-family:ui-monospace,Consolas,monospace;
+ --surface-1:#0a0e0a;--panel:#101810;--line:#1e3320;--line-soft:#142414;
+ --text-primary:#e8f0e8;--text-secondary:#a9c4a9;--text-muted:#6f8f6f;
+ --s1:#3987e5;--s2:#d95926;--s3:#199e70;--s4:#c98500;--s5:#d55181;--s6:#008300;--s7:#9085e9;--s8:#e66767;
+ background:var(--surface-1);color:var(--text-primary)}
+*{box-sizing:border-box}
+body{margin:0;padding:18px;max-width:1340px;margin:auto}
+h1{font-size:19px;margin:0 0 2px}
+.sub{color:var(--text-muted);font-size:11px;margin-bottom:14px}
+.live{color:#7cffc4}.live:before{content:'●';margin-right:6px;animation:p 1.5s infinite}
+@keyframes p{50%{opacity:.25}}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:8px;margin-bottom:14px}
+.tile{background:var(--panel);border:1px solid var(--line);padding:8px 10px}
+.tile .label{color:var(--text-muted);font-size:9.5px;text-transform:uppercase;letter-spacing:.07em}
+.tile .value{display:block;font-size:18px;margin-top:3px;color:var(--text-primary)}
+.layout{display:grid;grid-template-columns:minmax(540px,3fr) minmax(250px,1fr);gap:14px}
+@media(max-width:900px){.layout{grid-template-columns:1fr}}
+#stage{position:relative;background:var(--panel);border:1px solid var(--line)}
+canvas{display:block;width:100%;height:640px}
+#tip{position:absolute;pointer-events:none;background:#060a06;border:1px solid var(--line);
+ padding:7px 9px;font-size:11px;color:var(--text-secondary);display:none;max-width:240px;z-index:3}
+#tip b{color:var(--text-primary)}
+.legend{display:flex;flex-wrap:wrap;gap:12px;padding:8px 10px;border-top:1px solid var(--line-soft);
+ font-size:10.5px;color:var(--text-secondary)}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.legend .ring{background:transparent;border:2px solid #fff}
+.legend .hgt{background:transparent;border:1.5px solid var(--text-muted)}
+.panel{background:var(--panel);border:1px solid var(--line);padding:10px;margin-bottom:12px}
+.panel h2{font-size:12px;margin:0 0 8px;color:var(--text-secondary);font-weight:400;text-transform:uppercase;letter-spacing:.07em}
+.events{list-style:none;padding:0;margin:0;font-size:11px;max-height:250px;overflow:auto}
+.events li{padding:5px 0;border-bottom:1px solid var(--line-soft);color:var(--text-secondary)}
+.events b{color:#7fe9ff}
+#src{white-space:pre;font-size:10.5px;overflow:auto;max-height:340px;color:#c9e4ff;display:none}
+button{background:var(--panel);color:var(--text-secondary);border:1px solid var(--line);
+ padding:5px 10px;font:inherit;font-size:11px;cursor:pointer}
+button:hover{background:#142414}
+table{width:100%;border-collapse:collapse;font-size:11px;display:none}
+th{color:var(--text-muted);text-align:left;font-weight:400;padding:4px 6px;border-bottom:1px solid var(--line)}
+td{padding:4px 6px;border-bottom:1px solid var(--line-soft);color:var(--text-secondary)}
+</style></head><body>
+<h1>GRID 2 <span class="live" id="status">connecting…</span></h1>
+<div class="sub">each column = one founding dynasty · each row deeper = one generation later ·
+ dot area = wealth · white ring = model-authored · gray ring = gene splice · green flash = trade · white pulse = job won</div>
+<div class="tiles" id="tiles"></div>
+<div class="layout">
+<div>
+ <div id="stage"><canvas id="cv"></canvas><div id="tip"></div>
+ <div class="legend" id="legend"></div></div>
+ <div style="margin-top:8px"><button id="tbtn" onclick="toggleTable()">table view</button></div>
+ <table id="tab"><thead><tr><th>id</th><th>lineage</th><th>gen</th><th>author</th><th>balance</th>
+ <th>age</th><th>jobs</th><th>sold</th><th>goods</th></tr></thead><tbody></tbody></table>
+</div>
+<div>
+ <div class="panel"><h2>events</h2><ul class="events" id="events"></ul></div>
+ <div class="panel"><h2 id="srctitle">organism — click a node</h2><div id="src"></div></div>
+</div></div>
+<script>
+const SERIES=['--s1','--s2','--s3','--s4','--s5','--s6','--s7','--s8']
+ .map(v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim());
+const OTHER='#6f6f6f';
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d'),tip=document.getElementById('tip');
+let nodes=new Map(),rootSlots=new Map(),flashes=[],pulses=[],ghosts=[],lastRound=-1,state=null;
+
+function slotFor(root){
+ if(!rootSlots.has(root)){
+  if(rootSlots.size<SERIES.length) rootSlots.set(root,SERIES[rootSlots.size]);
+  else rootSlots.set(root,OTHER);
+ }
+ return rootSlots.get(root);
+}
+function resize(){const r=cv.parentElement.getBoundingClientRect();
+ cv.width=r.width*devicePixelRatio;cv.height=640*devicePixelRatio;
+ ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);}
+window.addEventListener('resize',resize);resize();
+
+const ROOT_NAMES={1:'compressor',2:'generalist',3:'librarian',4:'scholar',5:'generalist-b',6:'generalist-c'};
+
+function layout(){
+ const W=cv.clientWidth,roots=[...new Set([...nodes.values()].map(n=>n.root))].sort((a,b)=>a-b);
+ const colW=W/Math.max(1,roots.length);
+ const maxGen=Math.max(1,...[...nodes.values()].map(n=>n.gen));
+ const rowH=Math.min(64,(640-90)/(maxGen+1));
+ for(const root of roots){
+  const cx=colW*(roots.indexOf(root)+0.5);
+  const byGen={};
+  for(const n of nodes.values())if(n.root===root)(byGen[n.gen]??=[]).push(n);
+  for(const g in byGen){
+   const row=byGen[g].sort((a,b)=>a.oid-b.oid),k=row.length;
+   const spread=Math.min(34,(colW-30)/Math.max(1,k));
+   row.forEach((n,i)=>{n.tx=cx+(i-(k-1)/2)*spread;n.ty=70+g*rowH;});
+  }
+ }
+}
+
+async function poll(){
+ try{
+  const d=await (await fetch('/api/state',{cache:'no-store'})).json();
+  state=d;
+  document.getElementById('status').textContent='LIVE · round '+d.round;
+  document.getElementById('status').className='live';
+  const seen=new Set();
+  for(const o of d.organisms){
+   seen.add(o.oid);
+   if(!nodes.has(o.oid)){
+    let p=nodes.get(o.parent);
+    nodes.set(o.oid,{x:p?p.x:cv.clientWidth/2,y:p?p.y:70,
+                     born:performance.now(),...o});
+   } else Object.assign(nodes.get(o.oid),o);
+  }
+  for(const [oid,n] of nodes) if(!seen.has(oid)){
+   ghosts.push({x:n.x,y:n.y,r:rad(n),color:slotFor(n.root),t:performance.now()});
+   nodes.delete(oid);
+  }
+  if(d.round!==lastRound){
+   lastRound=d.round;
+   for(const w of (d.summary.wins||[])){const n=nodes.get(w);
+    if(n)pulses.push({oid:w,t:performance.now()});}
+   for(const [b,s] of (d.summary.deals||[])) flashes.push({b,s,t:performance.now()});
+  }
+  layout();tiles(d);legend(d);events(d);table(d);
+ }catch(e){document.getElementById('status').textContent='DISCONNECTED';
+  document.getElementById('status').className='';}
+}
+function tiles(d){
+ const t=[['round',d.round],['population',d.population],['max gen',d.maxGen],
+  ['jobs open',d.jobsOpen],['goods listed',d.market],['body trials',d.bodyTrials],['body cycles paid',d.bodyPaid],
+  ['paid out /rd',d.summary.paid_out],['jobs won /rd',d.summary.jobs_won],
+  ['births /rd',d.summary.births],['deaths /rd',d.summary.deaths],
+  ['trades /rd',d.summary.trades],['llm-authored /rd',d.summary.llm_muts],
+  ['cpu ms /rd',d.summary.cpu_ms]];
+ document.getElementById('tiles').innerHTML=t.map(([l,v])=>
+  `<div class="tile"><span class="label">${l}</span><b class="value">${(v??0).toLocaleString()}</b></div>`).join('');
+}
+function legend(d){
+ const counts={};for(const o of d.organisms)counts[o.root]=(counts[o.root]||0)+1;
+ let h=[...rootSlots.entries()].filter(([r])=>counts[r]).map(([r,c])=>
+  `<span><i style="background:${c}"></i>lineage ${r} (${counts[r]||0})</span>`).join('');
+ h+=`<span><i class="ring"></i>llm-authored</span><span><i class="hgt"></i>gene splice</span>`;
+ document.getElementById('legend').innerHTML=h;
+}
+function events(d){
+ document.getElementById('events').innerHTML=(d.events||[]).map(e=>
+  `<li><b>r${e.round}</b> ${e.text}</li>`).join('')||'<li>—</li>';
+}
+function table(d){
+ document.querySelector('#tab tbody').innerHTML=d.organisms.slice(0,60).map(o=>
+  `<tr><td>${o.oid}</td><td>${o.root}</td><td>${o.gen}</td><td>${o.author}</td>
+   <td>${o.balance.toLocaleString()}</td><td>${o.age}</td><td>${o.jobsWon}</td>
+   <td>${o.sold}</td><td>${o.goods}</td></tr>`).join('');
+}
+function toggleTable(){const t=document.getElementById('tab');
+ t.style.display=t.style.display==='table'?'none':'table';}
+
+function rad(n){return Math.max(4,Math.min(26,4+Math.sqrt(Math.max(0,n.balance))/16));}
+
+function tween(){
+ for(const n of nodes.values()){
+  if(n.tx===undefined)continue;
+  n.x+=(n.tx-n.x)*0.08;n.y+=(n.ty-n.y)*0.08;
+ }
+}
+
+function draw(){
+ tween();
+ const now=performance.now(),W=cv.clientWidth;
+ ctx.clearRect(0,0,W,640);
+ // column headers: the dynasties
+ if(state){
+  const roots=[...new Set([...nodes.values()].map(n=>n.root))].sort((a,b)=>a-b);
+  const colW=W/Math.max(1,roots.length);
+  ctx.font='11px ui-monospace,monospace';ctx.textAlign='center';
+  roots.forEach((r,i)=>{
+   ctx.fillStyle=slotFor(r);ctx.beginPath();ctx.arc(colW*(i+0.5)-38,22,4,0,7);ctx.fill();
+   ctx.fillStyle='#a9c4a9';ctx.fillText((ROOT_NAMES[r]||('lineage '+r)),colW*(i+0.5)+8,26);
+   ctx.strokeStyle='rgba(30,51,32,.6)';
+   if(i)ctx.strokeRect(colW*i,40,0,600);
+  });
+  ctx.fillStyle='#6f8f6f';ctx.textAlign='left';
+  ctx.fillText('gen 0',6,74);
+ }
+ ctx.lineWidth=1;
+ for(const n of nodes.values()){const p=nodes.get(n.parent);
+  if(p){ctx.strokeStyle='rgba(60,90,60,.35)';ctx.beginPath();
+   ctx.moveTo(p.x,p.y);ctx.lineTo(n.x,n.y);ctx.stroke();}}
+ flashes=flashes.filter(f=>now-f.t<1800);
+ for(const f of flashes){const a=nodes.get(f.b),b=nodes.get(f.s);if(!a||!b)continue;
+  const k=1-(now-f.t)/1800;
+  ctx.strokeStyle=`rgba(124,255,196,${0.75*k})`;ctx.lineWidth=1.5+k;
+  ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();}
+ ctx.lineWidth=1;
+ pulses=pulses.filter(p=>now-p.t<900);
+ for(const p of pulses){const n=nodes.get(p.oid);if(!n)continue;
+  const k=(now-p.t)/900;
+  ctx.strokeStyle=`rgba(255,255,255,${0.7*(1-k)})`;
+  ctx.beginPath();ctx.arc(n.x,n.y,rad(n)+k*22,0,7);ctx.stroke();}
+ ghosts=ghosts.filter(g=>now-g.t<1500);
+ for(const g of ghosts){const k=1-(now-g.t)/1500;
+  ctx.globalAlpha=k*0.5;ctx.fillStyle=g.color;
+  ctx.beginPath();ctx.arc(g.x,g.y,g.r*k,0,7);ctx.fill();ctx.globalAlpha=1;}
+ for(const n of nodes.values()){
+  const r=rad(n),grow=Math.min(1,(now-n.born)/600);
+  ctx.fillStyle=slotFor(n.root);
+  ctx.beginPath();ctx.arc(n.x,n.y,r*grow,0,7);ctx.fill();
+  ctx.strokeStyle='#0a0e0a';ctx.stroke();           // 2px-ish surface ring
+  if(n.author==='llm'){ctx.lineWidth=2;ctx.strokeStyle='#ffffff';
+   ctx.beginPath();ctx.arc(n.x,n.y,r*grow+2.5,0,7);ctx.stroke();ctx.lineWidth=1;}
+  else if(n.author==='hgt'){ctx.strokeStyle='rgba(220,220,220,.8)';
+   ctx.beginPath();ctx.arc(n.x,n.y,r*grow+2,0,7);ctx.stroke();}
+ }
+ requestAnimationFrame(draw);
+}
+
+let hover=null;
+cv.addEventListener('mousemove',e=>{
+ const rect=cv.getBoundingClientRect(),mx=e.clientX-rect.left,my=e.clientY-rect.top;
+ hover=null;
+ for(const n of nodes.values())
+  if(Math.hypot(n.x-mx,n.y-my)<Math.max(rad(n),10)+3){hover=n;break;}
+ if(hover){tip.style.display='block';
+  tip.style.left=Math.min(mx+14,rect.width-250)+'px';tip.style.top=(my+10)+'px';
+  tip.innerHTML=`<b>organism ${hover.oid}</b> · lineage ${hover.root} · gen ${hover.gen}<br>`+
+   `author ${hover.author} · age ${hover.age}<br>`+
+   `balance <b>${hover.balance.toLocaleString()}</b> · jobs ${hover.jobsWon} · sold ${hover.sold} · goods ${hover.goods}`;
+ } else tip.style.display='none';
+});
+cv.addEventListener('mouseleave',()=>{tip.style.display='none';hover=null;});
+cv.addEventListener('click',async()=>{
+ if(!hover)return;
+ const d=await (await fetch('/api/organism/'+hover.oid)).json();
+ document.getElementById('srctitle').textContent=
+  `organism ${d.oid} · gen ${d.gen} · ${d.balance.toLocaleString()} cycles`;
+ const el=document.getElementById('src');
+ el.style.display='block';el.textContent=d.source||'(gone)';
+});
+poll();setInterval(poll,2500);draw();
+</script></body></html>

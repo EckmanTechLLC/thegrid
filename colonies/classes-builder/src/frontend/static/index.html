@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>thegrid</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>thegrid</h1>
+    <div id="controls">
+      <select id="model-select">
+        <option value="gpt-4o-mini">gpt-4o-mini</option>
+        <option value="gpt-4o">gpt-4o</option>
+        <option value="gpt-4-turbo">gpt-4-turbo</option>
+      </select>
+      <button id="start-stop-btn">Start Aria</button>
+      <button id="reset-btn">Reset World</button>
+    </div>
+  </header>
+  <main>
+    <div id="map-panel">
+      <canvas id="map"></canvas>
+    </div>
+    <div id="feed-panel">
+      <div id="feed"></div>
+    </div>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

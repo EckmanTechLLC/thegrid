@@ -1,0 +1,526 @@
+"""The substrate organisms live in.
+
+Three scarce things, all global and all real to the organisms:
+
+  energy  — per-tile, regenerating, depletable. The only source of metabolism.
+  memory  — a hard colony-wide cap. Allocation fails when it is exhausted,
+            which is what actually bounds population size.
+  heat    — rises with total instructions executed, decays passively. Above a
+            threshold every organism's costs are multiplied. Nobody can escape
+            it alone: it is a commons problem, not an individual one.
+
+In the deployed version, energy is a CPU-time budget, memory is real RSS under
+a cgroup, and heat is read from thermal sensors. Here they are accounted in
+software so the dynamics can be tested before they are wired to the metal.
+The interfaces are the same either way.
+"""
+
+from dataclasses import dataclass, field
+import random
+
+import time
+
+from .isa import Op
+
+
+@dataclass
+class WorldConfig:
+    width: int = 32
+    height: int = 32
+    tile_capacity: float = 90.0
+    # Tuned so the colony consumes energy faster than the world makes it.
+    # At higher values the map saturates, starvation stops happening, and
+    # memory becomes the only binding constraint — which hollows out the
+    # whole premise. Verified by sweep: at 0.06 starvation dominates deaths.
+    tile_regen: float = 0.06         # energy per tile per tick
+    harvest_rate: float = 6.0        # max energy drawn by one harvest
+    memory_cap: int = 6000           # total genome-words the colony may hold
+    heat_per_instruction: float = 0.02
+    heat_decay: float = 0.90         # fraction retained per tick
+    # Tuned against the retuned regen: at 40 the colony never gets hot enough
+    # to throttle and the commons problem never bites; at 22 it engages in
+    # bursts and self-regulates (hot -> costs rise -> deaths -> cools).
+    heat_threshold: float = 22.0     # below this, no throttling
+    heat_penalty: float = 0.04       # cost multiplier added per degree over
+    storm_interval: int = 1000       # Colony Two resource-weather cadence
+    storm_warning: int = 100         # input cue lead time
+    storm_scout_depth: int = 4       # bloom-side boundary strip that senses it
+    drought_fraction: float = 0.08   # energy retained in the drought quadrant
+    bloom_fraction: float = 0.75     # minimum capacity after a bloom
+    signal_radius: int = 3
+    signal_duration: int = 24
+    signal_attenuation: int = 5
+    seed: int = 1337
+
+
+class World:
+    def __init__(self, config: WorldConfig | None = None):
+        self.config = config or WorldConfig()
+        c = self.config
+        self.rng = random.Random(c.seed)
+
+        # Energy is not uniform. Patchiness is what makes movement and sensing
+        # worth evolving — a flat world rewards sitting still.
+        self.energy: list[list[float]] = [
+            [self._initial_energy() for _ in range(c.width)]
+            for _ in range(c.height)
+        ]
+        self.signals = [[0] * c.width for _ in range(c.height)]
+        self.signal_strength = [[0] * c.width for _ in range(c.height)]
+        self.structures = [[0] * c.width for _ in range(c.height)]
+        self.scrap = [[0.0] * c.width for _ in range(c.height)]
+        # Last organism id to build on each tile; -1 means unbuilt. Feeds the
+        # builder class's usefulness channel.
+        self.built_by = [[-1] * c.width for _ in range(c.height)]
+        # shared code commons: routines any organism may publish to or call
+        self.code_slots: list[list[int]] = [[] for _ in range(16)]
+        self.slot_uses: list[int] = [0] * 16
+        self.slot_owner: list[int] = [-1] * 16
+        # A slot is held while it is being called and released when it goes
+        # cold. Without this, publish overwrites unconditionally and no routine
+        # survives long enough to be worth calling.
+        self.slot_heat: list[float] = [0.0] * 16
+        # Reclaimed memory. free() has no location and does not rot: what a
+        # dead program held returns to one pool that any allocator can draw on.
+        self.reclaim_pool: float = 0.0
+        # shared data bus: 16 global words, reachable from any tile. Unlike a
+        # signal it does not attenuate, expire, or respect a biome boundary.
+        self.bus: list[int] = [0] * 16
+        # bounties: escrow posted against a bus address, claimed by whoever
+        # writes the wanted value there. Value the population sets itself.
+        self.bounties: list[dict | None] = [None] * 16
+        self.bounty_paid: float = 0.0
+        self.bounty_claims: int = 0
+        self.bounty_expired: int = 0
+        # macro slots: eight opcodes whose meaning the population authors
+        self.macros: list[list[int]] = [[] for _ in range(8)]
+        self.macro_uses: list[int] = [0] * 8
+        self.macro_heat: list[float] = [0.0] * 8
+        self.macro_owner: list[int] = [-1] * 8
+        # real work requested this tick, and the cycles actually spent
+        self.burn_requests: int = 0
+        self.burn_total: int = 0
+        self.burn_ns: int = 0
+        self.bus_writes: int = 0
+        self.bus_reads: int = 0
+        self.bus_written_at: list[int] = [-1] * 16
+        self.bus_writer: list[int] = [-1] * 16
+
+        self.memory_used: int = 0
+        self.heat: float = 0.0
+        self.instructions_this_tick: int = 0
+        self.tick: int = 0
+        self.storm_count: int = 0
+        self.last_storm_tick: int = -1
+        self.last_drought_quadrant: int | None = None
+        self.last_bloom_quadrant: int | None = None
+
+    def _initial_energy(self) -> float:
+        c = self.config
+        # Roughly a third of tiles are rich, the rest are lean.
+        return c.tile_capacity if self.rng.random() < 0.35 else c.tile_capacity * 0.15
+
+    # ── energy ────────────────────────────────────────────────────────────
+
+    def tile_energy(self, x: int, y: int) -> float:
+        return self.energy[y % self.config.height][x % self.config.width]
+
+    def harvest(self, x: int, y: int) -> float:
+        """Draw energy from a tile. Returns what was actually available."""
+        c = self.config
+        y, x = y % c.height, x % c.width
+        # The forage biome rewards a short harvesting specialist; elsewhere
+        # harvesting is weaker enough that mobility, building, or information
+        # processing can repay their extra instructions.
+        rate = c.harvest_rate * (1.35 if self.biome(x, y) == 0 else 0.78)
+        taken = min(rate, self.energy[y][x])
+        self.energy[y][x] -= taken
+        return taken
+
+    def wrap(self, x: int, y: int) -> tuple[int, int]:
+        return x % self.config.width, y % self.config.height
+
+    def biome(self, x: int, y: int) -> int:
+        """Persistent NW forage, NE nomad, SW engineer, SE information niche."""
+        c = self.config
+        x, y = self.wrap(x, y)
+        return (x >= c.width // 2) + 2 * (y >= c.height // 2)
+
+    def move(self, x: int, y: int, dx: int, dy: int) -> tuple[int, int]:
+        """Move within a biome, crossing boundaries only through narrow gates."""
+        destination = self.wrap(x + dx, y + dy)
+        if self.biome(x, y) == self.biome(*destination):
+            return destination
+        # Two three-tile migration corridors cross each boundary. This also
+        # gates the toroidal outer seam, preventing instant global mixing.
+        perpendicular = y if dx else x
+        extent = self.config.height if dx else self.config.width
+        gates = (extent // 4, 3 * extent // 4)
+        return destination if any(abs(perpendicular - gate) <= 1 for gate in gates) else (x, y)
+
+    def instruction_cost_multiplier(self, op: Op, x: int, y: int) -> float:
+        """Local energetic tradeoffs; replication remains the neutral yardstick."""
+        biome = self.biome(x, y)
+        local = 1.0
+        if biome == 0:  # forage: cheap harvesting, expensive infrastructure
+            if op == Op.HARVEST:
+                local = 0.65
+            elif op in (Op.BUILD, Op.SIGNAL, Op.LISTEN):
+                local = 1.4
+        elif biome == 1:  # nomad: cheap sensing/motion, poor stationary yield
+            if op in (Op.SCAN, Op.MOVE):
+                local = 0.55
+            elif op in (Op.HARVEST, Op.BUILD):
+                local = 1.3
+        elif biome == 2:  # engineer: construction pays, motion/foraging do not
+            if op in (Op.BUILD, Op.SALVAGE):
+                local = 0.45
+            elif op in (Op.HARVEST, Op.MOVE):
+                local = 1.3
+        else:  # information: communication, memory, and computation are cheap
+            # fetch and locate are sensing and reading; they belong here with
+            # post, which I added alone. link, burn, offer, define and the
+            # macros stay flat deliberately - none of them is an information
+            # act, and pricing them here would be a design choice dressed as a
+            # bug fix.
+            if op in (Op.SIGNAL, Op.LISTEN, Op.INPUT, Op.OUTPUT, Op.ADD, Op.SUB,
+                      Op.XOR, Op.LOAD, Op.STORE, Op.NAND, Op.PEEK, Op.COPYN,
+                      Op.POST, Op.FETCH, Op.LOCATE):
+                local = 0.55
+            elif op in (Op.HARVEST, Op.BUILD):
+                local = 1.35
+        return self.cost_multiplier * local
+
+    def build_cost(self, x: int, y: int) -> float:
+        return 1.5 if self.biome(x, y) == 2 else 4.0
+
+    def task_reward_multiplier(self, x: int, y: int) -> float:
+        return 1.75 if self.biome(x, y) == 3 else 0.75
+
+    # ── shared code commons ───────────────────────────────────────────────
+    slot_hold_threshold = 0.5   # call-heat below which a slot may be claimed
+    slot_decay = 0.999          # per-tick decay of a slot's call heat
+
+    def publish_routine(self, slot: int, words: list[int], owner: int = -1) -> bool:
+        """Claim an address. Fails while the current occupant is still called."""
+        slot %= len(self.code_slots)
+        heat = getattr(self, "slot_heat", [0.0] * len(self.code_slots))[slot]
+        if self.code_slots[slot] and heat >= self.slot_hold_threshold:
+            return False
+        self.code_slots[slot] = list(words[:8])
+        self.slot_uses[slot] = 0
+        self.slot_heat[slot] = 0.0
+        self.slot_owner[slot] = owner
+        return True
+
+    def get_routine(self, slot: int) -> list[int]:
+        slot %= len(self.code_slots)
+        self.slot_uses[slot] += 1
+        self.slot_heat[slot] += 1.0
+        return self.code_slots[slot]
+
+    def decay_commons(self) -> None:
+        """Once per tick: a routine nobody calls loosens its grip on its slot."""
+        self.decay_macros()
+        heat = self.slot_heat
+        for index, value in enumerate(heat):
+            if value:
+                heat[index] = value * self.slot_decay
+
+    # ── shared data bus ───────────────────────────────────────────────────
+    def bus_post(self, address: int, value: int, writer: int = -1) -> None:
+        """Leave a value at a global address. Last writer wins; no validation."""
+        address %= len(self.bus)
+        self.bus[address] = value & 0xFF
+        self.bus_written_at[address] = self.tick
+        self.bus_writer[address] = writer
+        self.bus_writes += 1
+
+    # ── real work ─────────────────────────────────────────────────────────
+    burn_us_per_request = 60      # real microseconds bought by one burn
+    burn_cap_us = 10_000          # ceiling per tick, so the colony cannot
+                                  # stall its own scheduler entirely
+
+    def burn_request(self) -> None:
+        self.burn_requests += 1
+
+    def spend_cycles(self) -> None:
+        """Do the work the colony actually asked for. Not a simulation of load."""
+        requests, self.burn_requests = self.burn_requests, 0
+        if not requests:
+            return
+        budget_ns = min(self.burn_cap_us, requests * self.burn_us_per_request) * 1000
+        started = time.perf_counter_ns()
+        value = 1.000001
+        while time.perf_counter_ns() - started < budget_ns:
+            for _ in range(256):
+                value = value * 1.0000001 + 0.000001
+        self.burn_ns += time.perf_counter_ns() - started
+        self.burn_total += requests
+
+    # ── bounties ──────────────────────────────────────────────────────────
+    bounty_ttl = 2000             # ticks before unclaimed escrow is refundable
+
+    def offer_bounty(self, address: int, want: int, escrow: float,
+                     owner: int) -> bool:
+        address %= len(self.bounties)
+        if self.bounties[address] is not None or escrow <= 0:
+            return False
+        self.bounties[address] = {"want": want & 0xFF, "escrow": escrow,
+                                  "owner": owner, "tick": self.tick}
+        return True
+
+    def claim_bounty(self, address: int, value: int, writer: int) -> float:
+        """Settle through the ordinary bus write. No separate claim instruction."""
+        address %= len(self.bounties)
+        bounty = self.bounties[address]
+        if bounty is None or writer < 0 or writer == bounty["owner"]:
+            return 0.0
+        if (value & 0xFF) != bounty["want"]:
+            return 0.0
+        self.bounties[address] = None
+        self.bounty_paid += bounty["escrow"]
+        self.bounty_claims += 1
+        return bounty["escrow"]
+
+    # ── macros ────────────────────────────────────────────────────────────
+    macro_hold_threshold = 0.5
+    macro_decay = 0.999
+
+    def define_macro(self, slot: int, words: list[int], owner: int = -1) -> bool:
+        slot %= len(self.macros)
+        if self.macros[slot] and self.macro_heat[slot] >= self.macro_hold_threshold:
+            return False
+        self.macros[slot] = list(words)
+        self.macro_uses[slot] = 0
+        self.macro_heat[slot] = 0.0
+        self.macro_owner[slot] = owner
+        return True
+
+    def run_macro(self, slot: int) -> list[int]:
+        slot %= len(self.macros)
+        self.macro_uses[slot] += 1
+        self.macro_heat[slot] += 1.0
+        return self.macros[slot]
+
+    def decay_macros(self) -> None:
+        heat = self.macro_heat
+        for index, value in enumerate(heat):
+            if value:
+                heat[index] = value * self.macro_decay
+
+    def bus_fetch(self, address: int) -> int:
+        self.bus_reads += 1
+        return self.bus[address % len(self.bus)]
+
+    def signal(self, x: int, y: int, value: int) -> None:
+        radius = getattr(self.config, "signal_radius", 3)
+        duration = getattr(self.config, "signal_duration", 24)
+        if self.biome(x, y) == 3:
+            duration = int(duration * 1.75)
+        attenuation = getattr(self.config, "signal_attenuation", 5)
+        for dy in range(-radius, radius + 1):
+            for dx in range(-radius, radius + 1):
+                distance = abs(dx) + abs(dy)
+                if distance > radius:
+                    continue
+                sx, sy = self.wrap(x + dx, y + dy)
+                strength = max(1, duration - distance * attenuation)
+                if strength >= self.signal_strength[sy][sx]:
+                    self.signals[sy][sx] = value & 0xFF
+                    self.signal_strength[sy][sx] = strength
+
+    def listen(self, x: int, y: int) -> int:
+        cells = [self.wrap(x, y), self.wrap(x, y - 1), self.wrap(x + 1, y),
+                 self.wrap(x, y + 1), self.wrap(x - 1, y)]
+        sx, sy = max(cells, key=lambda p: self.signal_strength[p[1]][p[0]])
+        return self.signals[sy][sx] if self.signal_strength[sy][sx] else 0
+
+    def listen_strength(self, x: int, y: int) -> int:
+        cells = [self.wrap(x, y), self.wrap(x, y - 1), self.wrap(x + 1, y),
+                 self.wrap(x, y + 1), self.wrap(x - 1, y)]
+        return max(self.signal_strength[sy][sx] for sx, sy in cells)
+
+    def build(self, x: int, y: int, builder: int = -1) -> None:
+        x, y = self.wrap(x, y)
+        self.structures[y][x] = min(20, self.structures[y][x] + 1)
+        if builder >= 0:
+            self.built_by[y][x] = builder
+
+    def deposit_scrap(self, x: int, y: int, genome_words: int,
+                      remaining_energy: float) -> float:
+        """A dead program's remains land where it died.
+
+        The classes build makes scrap positional again: cleaners have to
+        travel to the mess, so death zones become territory instead of the
+        pool being an everywhere-faucet. The global reclaim_pool is kept only
+        as a legacy trickle for salvage far from any corpse."""
+        amount = min(12.0, genome_words * 0.45 + max(0.0, remaining_energy) * 0.20)
+        self.scrap[y % self.config.height][x % self.config.width] += amount
+        return amount
+
+    def salvage(self, x: int, y: int) -> float:
+        """Eat the scrap underfoot; an empty tile only sips the old pool."""
+        row, col = y % self.config.height, x % self.config.width
+        local = self.scrap[row][col]
+        if local > 0:
+            taken = min(5.0, local)
+            self.scrap[row][col] = local - taken
+            return taken
+        taken = min(1.0, self.reclaim_pool)
+        self.reclaim_pool -= taken
+        # No multiplier. Handing back more than was removed mints energy, and
+        # with the pool no longer decaying that became an uncapped faucet: the
+        # engineer quadrant printed 25% on every reclaim. Colony one found it
+        # within 5,000 ticks - a 9-op salvage loop carrying no harvest at all -
+        # and reproduced until it hit its cgroup ceiling and wedged.
+        # That quadrant keeps its advantage where it costs nothing to conserve:
+        # salvage already runs at 0.45x instruction cost there.
+        return taken
+
+    # ── memory ────────────────────────────────────────────────────────────
+
+    def request_memory(self, words: int) -> bool:
+        """Claim RAM for a child buffer. Fails when the colony is full.
+
+        This failure is the population control. There is no max_population
+        constant anywhere — organisms stop being able to reproduce because
+        the machine is out of room, exactly as it would be in deployment.
+        """
+        if self.memory_used + words > self.config.memory_cap:
+            return False
+        self.memory_used += words
+        return True
+
+    def release_memory(self, words: int) -> None:
+        self.memory_used = max(0, self.memory_used - words)
+
+    @property
+    def memory_pressure(self) -> float:
+        return self.memory_used / self.config.memory_cap
+
+    # ── heat ──────────────────────────────────────────────────────────────
+
+    def charge_instruction(self) -> None:
+        self.instructions_this_tick += 1
+
+    @property
+    def cost_multiplier(self) -> float:
+        """What every instruction currently costs, relative to its base price."""
+        c = self.config
+        over = self.heat - c.heat_threshold
+        return 1.0 + c.heat_penalty * over if over > 0 else 1.0
+
+    # ── tick ──────────────────────────────────────────────────────────────
+
+    def storm_regions(self, tick: int | None = None) -> tuple[int, int]:
+        interval = getattr(self.config, "storm_interval", 1000)
+        cycle = (self.tick if tick is None else tick) // interval
+        drought = cycle % 4
+        return drought, (drought + 2) % 4
+
+    def weather_cue(self, x: int, y: int) -> int | None:
+        """Give bloom-front scouts a direction; everyone else must listen."""
+        c = self.config
+        interval = getattr(c, "storm_interval", 1000)
+        warning = getattr(c, "storm_warning", 100)
+        if not interval or self.tick % interval < interval - warning:
+            return None
+        next_tick = ((self.tick // interval) + 1) * interval
+        _, bloom = self.storm_regions(next_tick)
+        x, y = self.wrap(x, y)
+        if self.biome(x, y) != bloom:
+            return None
+        mid_x, mid_y = c.width // 2, c.height // 2
+        depth = max(1, getattr(c, "storm_scout_depth", 4))
+        near_vertical_front = (bloom % 2 == 0 and mid_x - depth <= x < mid_x) or (
+            bloom % 2 == 1 and mid_x <= x < mid_x + depth)
+        near_horizontal_front = (bloom < 2 and mid_y - depth <= y < mid_y) or (
+            bloom >= 2 and mid_y <= y < mid_y + depth)
+        if not (near_vertical_front or near_horizontal_front):
+            return None
+
+        target_x = c.width // 4 if bloom % 2 == 0 else 3 * c.width // 4
+        target_y = c.height // 4 if bloom < 2 else 3 * c.height // 4
+        dx, dy = target_x - x, target_y - y
+        if abs(dx) >= abs(dy) and dx:
+            return 1 if dx > 0 else 3
+        return 2 if dy > 0 else 0
+
+    def apply_resource_storm(self) -> bool:
+        """Apply Colony Two's periodic spatial drought/bloom disturbance."""
+        c = self.config
+        interval = getattr(c, "storm_interval", 1000)
+        if not interval or not self.tick or self.tick % interval:
+            return False
+        drought, bloom = self.storm_regions()
+        return self._apply_storm(drought, bloom)
+
+    def _apply_storm(self, drought: int, bloom: int) -> bool:
+        """Burn one quadrant, flood the opposite one, and record the event."""
+        c = self.config
+        drought_fraction = getattr(c, "drought_fraction", 0.08)
+        bloom_floor = c.tile_capacity * getattr(c, "bloom_fraction", 0.75)
+        for y, row in enumerate(self.energy):
+            for x in range(c.width):
+                quadrant = (x >= c.width // 2) + 2 * (y >= c.height // 2)
+                if quadrant == drought:
+                    row[x] *= drought_fraction
+                    self.structures[y][x] //= 2
+                elif quadrant == bloom:
+                    row[x] = max(row[x], bloom_floor)
+        self.storm_count = getattr(self, "storm_count", 0) + 1
+        self.last_storm_tick = self.tick
+        self.last_drought_quadrant = drought
+        self.last_bloom_quadrant = bloom
+        return True
+
+    @property
+    def next_storm_tick(self) -> int:
+        interval = getattr(self.config, "storm_interval", 1000)
+        return ((self.tick // interval) + 1) * interval
+
+    def step(self) -> None:
+        c = self.config
+        self.apply_resource_storm()
+        for y, row in enumerate(self.energy):
+            for x in range(c.width):
+                if row[x] < c.tile_capacity:
+                    biome = self.biome(x, y)
+                    # The rotating climate bonus is gone. It began as
+                    # phase = (tick // 2000) % 4, a clock that moved a 1.8x
+                    # multiplier through the quadrants so each held it a
+                    # quarter of the time. Keying it to machine_band was meant
+                    # to make it physical and instead froze it: band is
+                    # hot_bit + 2*memory_bit, both of which sit at 0 on this
+                    # box, so NW held the bonus permanently and every colony
+                    # piled into it - 53% to 81% of every population.
+                    #
+                    # Measured over 80s looking for an honest replacement:
+                    # Tctl spread 2.0C, loadavg 0.4, cpu 10.9%, gpu busy 39
+                    # but pegged at a 98% median. Nothing on this machine
+                    # spends meaningful time in four distinct states, and
+                    # quantising a saturated signal into quartiles would
+                    # manufacture the rotation rather than measure it - a
+                    # clock in a sensor's clothes, which is the mistake this
+                    # is fixing. The biome base rates still differentiate the
+                    # quadrants; that differentiation is stated design rather
+                    # than an artifact.
+                    climate = 1.0
+                    base = (1.25, 0.65, 0.40, 0.75)[biome]
+                    construction = self.structures[y][x] * 0.003 * (4.0 if biome == 2 else 0.6)
+                    row[x] = min(c.tile_capacity, row[x] + c.tile_regen * climate * base + construction)
+                if self.signal_strength[y][x] > 0:
+                    self.signal_strength[y][x] -= 1
+                    if self.signal_strength[y][x] == 0:
+                        self.signals[y][x] = 0
+                if self.tick and self.tick % 500 == 0 and self.structures[y][x] > 0:
+                    self.structures[y][x] -= 1
+
+        self.heat = self.heat * c.heat_decay + self.instructions_this_tick * c.heat_per_instruction
+        self.decay_commons()
+        self.instructions_this_tick = 0
+        self.tick += 1
+
+    def total_energy(self) -> float:
+        return sum(sum(row) for row in self.energy)
