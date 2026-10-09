@@ -1,0 +1,25 @@
+[Unit]
+Description=The Grid rot1
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/etl/odin/thegrid-rot1
+ExecStart=/home/etl/odin/thegrid-worktree/.venv/bin/python -m src.colony.live --host 0.0.0.0 --port 8821 --ticks-per-second 10 --mutator random --name "rot1" --features "bitrot,bounty,predation" --peers "127.0.0.1:8822" --state /home/etl/.local/state/thegrid-rot1/colony.pkl
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/etl/odin/thegrid-rot1
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/etl/.local/state/thegrid-rot1
+MemoryMax=1536M
+MemoryHigh=1024M
+MemorySwapMax=0
+CPUQuota=100%
+CPUWeight=100
+
+[Install]
+WantedBy=default.target

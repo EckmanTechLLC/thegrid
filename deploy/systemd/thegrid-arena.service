@@ -1,0 +1,25 @@
+[Unit]
+Description=The Grid arena - eight hand-designed specialists competing
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/etl/odin/thegrid-arena
+ExecStart=/home/etl/odin/thegrid-worktree/.venv/bin/python -m src.colony.live --host 0.0.0.0 --port 8823 --ticks-per-second 10 --mutator random --name "arena" --features "predation,grazing" --state /home/etl/.local/state/thegrid-arena/colony.pkl
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/etl/odin/thegrid-arena
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/etl/.local/state/thegrid-arena
+MemoryMax=1536M
+MemoryHigh=1024M
+MemorySwapMax=0
+CPUQuota=100%
+CPUWeight=100
+
+[Install]
+WantedBy=default.target
